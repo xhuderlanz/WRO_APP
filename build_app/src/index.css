@@ -1,0 +1,71 @@
+/* src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Variables globales */
+:root {
+  --page-max-w: 1200px;
+  --panel-w: 420px; /* ancho del panel izquierdo, ajusta si quieres 360, 420, etc. */
+}
+
+/* Reset / basicos */
+html, body, #root {
+  height: 100%;
+}
+body {
+  @apply bg-slate-50 text-slate-700;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  margin: 0;
+}
+
+/* Layout general (centra el contenido y le da max-width) */
+.app-shell {
+  max-width: var(--page-max-w);
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+/* --- Estilos específicos para el área principal --- */
+.main-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+/* para pantallas grandes usamos dos columnas: panel fijo + canvas flexible */
+@media (min-width: 1024px) {
+  .main-grid {
+    grid-template-columns: var(--panel-w) 1fr;
+  }
+}
+
+/* Panel izquierdo (tarjeta limpia) */
+.left-panel {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.06);
+  padding: 1rem;
+}
+
+/* Card que contiene el canvas (look limpio / rounded / sombra) */
+.canvas-card {
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(15,23,42,0.06);
+  padding: 18px;
+  overflow: hidden;
+  min-height: 420px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+}
+
+/* Forzar que el canvas ocupe el 100% del ancho de la card y mantener el comportamiento de resize que hace tu script */
+.canvas-card canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Ajustes menores visibilidad/espaciado para la lista de secciones */
+.sections-list { gap: .5rem; display:flex; flex-direction:column; }

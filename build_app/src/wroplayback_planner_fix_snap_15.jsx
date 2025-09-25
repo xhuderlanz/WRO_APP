@@ -1,4 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import juniorFieldImg from "./assets/WRO-2025-GameMat-Junior2025.jpg";
+import elementaryFieldImg from "./assets/WRO-2025-GameMat-Elementary2025.jpg";
+import doubleTennisFieldImg from "./assets/WRO-2025_RoboSports_Double-Tennis_Playfield.jpg";
+
 
 // WRO Mission Planner – Reproducción (v18 - Snap 15° corregido)
 // - Corregido: el botón "Snap 15°" ahora también constriñe la POSICIÓN del punto dibujado,
@@ -18,8 +22,9 @@ const uid = (p = "id") => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 const MAT_MM = { w: 2362, h: 1143 };
 const MAT_CM = { w: MAT_MM.w / 10, h: MAT_MM.h / 10 };
 const FIELD_PRESETS = [
-    { key: "junior", name: "RoboMission Junior 2025", bg: "https://placehold.co/2362x1143/cccccc/333333?text=Junior+2025+Mat" },
-    { key: "elementary", name: "RoboMission Elementary 2025", bg: "https://placehold.co/2362x1143/a1a1a1/333333?text=Elementary+2025+Mat" },
+    { key: "junior", name: "RoboMission Junior 2025", bg: juniorFieldImg },
+    { key: "elementary", name: "RoboMission Elementary 2025", bg: elementaryFieldImg },
+    { key: "double-tennis", name: "RoboSports Double Tennis 2025", bg: doubleTennisFieldImg },
     { key: "custom", name: "Personalizado", bg: null },
 ];
 const DEFAULT_GRID = { cellSize: 1, pixelsPerUnit: 5, lineAlpha: 0.35, offsetX: 0, offsetY: 0 };
@@ -249,14 +254,37 @@ export default function WROPlaybackPlanner() {
     }, [unitToPx]);
 
     const recalcAllFollowingSections = useCallback((allSections, changedSectionId) => {
-        const changedIndex = allSections.findIndex(s => s.id === changedSectionId); if (changedIndex === -1) return allSections; let sectionsCopy = [...allSections];
-        for (let i = changedIndex; i < sectionsCopy.length; i++) {
-            const startPose = i === 0 ? initialPose : computePoseUpToSection(sectionsCopy[i].id);
-            const newPoints = pointsFromActions(sectionsCopy[i].actions, startPose);
-            sectionsCopy[i] = { ...sectionsCopy[i], points: newPoints };
+        const changedIndex = allSections.findIndex(s => s.id === changedSectionId);
+        if (changedIndex === -1) return allSections;
+
+        const sectionsCopy = allSections.map(section => ({ ...section }));
+        const advancePose = (start, actions) => {
+            let pose = { ...start };
+            for (const act of actions) {
+                if (act.type === 'rotate') {
+                    pose.theta += act.angle * DEG2RAD;
+                } else {
+                    const dx = Math.cos(pose.theta) * unitToPx(act.distance);
+                    const dy = Math.sin(pose.theta) * unitToPx(act.distance);
+                    pose = { x: pose.x + dx, y: pose.y + dy, theta: pose.theta };
+                }
+            }
+            return pose;
+        };
+
+        let runningPose = { ...initialPose };
+
+        for (let i = 0; i < sectionsCopy.length; i++) {
+            const startPose = { ...runningPose };
+            if (i >= changedIndex) {
+                const newPoints = pointsFromActions(sectionsCopy[i].actions, startPose);
+                sectionsCopy[i] = { ...sectionsCopy[i], points: newPoints };
+            }
+            runningPose = advancePose(startPose, sectionsCopy[i].actions);
         }
+
         return sectionsCopy;
-    }, [computePoseUpToSection, pointsFromActions, initialPose]);
+    }, [initialPose, pointsFromActions, unitToPx]);
 
     const updateSectionActions = useCallback((sectionId, newActions) => {
         setSections(prev => {
@@ -480,13 +508,34 @@ export default function WROPlaybackPlanner() {
         <div className="w-full h-full min-h-screen bg-slate-50">
             <Toolbar {...{ drawMode, setDrawMode, snapAngles, setSnapAngles, snapGrid, setSnapGrid, isRunning, isPaused, startMission, startSection, pauseResume, stopPlayback, setShowOptions, rulerActive, handleRulerToggle }} />
 
-            <main className={`max-w-full mx-auto p-3 grid grid-cols-1 ${isSectionsPanelCollapsed ? 'lg:grid-cols-[auto_1fr]' : 'lg:grid-cols-[420px_1fr]'} gap-3 transition-all duration-300`}>
-                <SectionsPanel {...{ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed: isSectionsPanelCollapsed, setIsCollapsed: setIsSectionsPanelCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, unit }} />
-                
-                <div ref={containerRef} className="bg-white rounded-2xl shadow overflow-hidden">
-                    <canvas ref={canvasRef} onMouseMove={onCanvasMove} onMouseDown={onCanvasDown} onMouseUp={onCanvasUp} onMouseLeave={onCanvasUp} onClick={onCanvasClick} onContextMenu={handleContextMenu} className={`w-full block ${isSettingOrigin ? 'cursor-copy' : 'cursor-crosshair'}`} style={{ display: 'block' }} />
+            <main className="app-shell">
+            <div className="main-grid">
+                {/* PANEL IZQUIERDO (card) */}
+                <aside className="left-panel">
+                {/* mantén la misma instancia del SectionsPanel, pero agrégale un wrapper para spacing */}
+                <div className="sections-list">
+                    <SectionsPanel {...{ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed: isSectionsPanelCollapsed, setIsCollapsed: setIsSectionsPanelCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, unit }} />
                 </div>
+                </aside>
+
+                {/* AREA DEL CANVAS (card limpia) */}
+                <section className="canvas-card" aria-label="Canvas">
+                <div ref={containerRef} style={{ width: '100%' }}>
+                    <canvas ref={canvasRef}
+                            onMouseMove={onCanvasMove}
+                            onMouseDown={onCanvasDown}
+                            onMouseUp={onCanvasUp}
+                            onMouseLeave={onCanvasUp}
+                            onClick={onCanvasClick}
+                            onContextMenu={handleContextMenu}
+                            className={`${isSettingOrigin ? 'cursor-copy' : 'cursor-crosshair'}`}
+                            />
+                </div>
+                </section>
+            </div>
             </main>
+
+
 
             <OptionsPanel {...{ showOptions, setShowOptions, fieldKey, setFieldKey, bgOpacity, setBgOpacity, grid, setGrid, robot, setRobot, initialPose, setInitialPose, handleBgUpload, handleRobotImageUpload, setIsSettingOrigin, unit, setUnit }} />
 
