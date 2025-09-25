@@ -83,35 +83,89 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
     const handleActionDragStart = (e, sectionId, actionIndex) => { setDraggedAction({ sectionId, actionIndex }); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ''); };
     const handleActionDrop = (e, targetSectionId, targetActionIndex) => { e.preventDefault(); if (!draggedAction || draggedAction.sectionId !== targetSectionId) return; const { actionIndex: draggedIndex } = draggedAction; if (draggedIndex === targetActionIndex) return; const section = sections.find(s => s.id === targetSectionId); if (!section) return; const reorderedActions = [...section.actions]; const [draggedItem] = reorderedActions.splice(draggedIndex, 1); reorderedActions.splice(targetActionIndex, 0, draggedItem); updateSectionActions(targetSectionId, reorderedActions); };
 
-    if (isCollapsed) return (<div className="bg-white rounded-2xl shadow p-3 self-start"><button onClick={() => setIsCollapsed(false)} className="p-2 rounded-lg hover:bg-slate-100" title="Expandir Panel"><IconChevronRight /></button></div>);
+    if (isCollapsed) {
+        return (
+            <div className="panel-card self-start flex items-center justify-center w-16 h-16">
+                <button
+                    onClick={() => setIsCollapsed(false)}
+                    className="toolbar-btn toolbar-btn--muted"
+                    title="Expandir Panel"
+                >
+                    <IconChevronRight />
+                </button>
+            </div>
+        );
+    }
 
     return (
-        <div className="bg-white rounded-2xl shadow p-3 space-y-2 self-start">
-            <div className="flex items-center justify-between"><h2 className="text-lg font-medium">Secciones</h2><div><button onClick={addSection} className="px-3 py-1.5 rounded-xl bg-emerald-500 text-white text-sm mr-2">+ Añadir</button><button onClick={() => setIsCollapsed(true)} className="p-2 rounded-lg hover:bg-slate-100 inline-flex align-middle" title="Minimizar Panel"><IconChevronLeft /></button></div></div>
-            <div className="space-y-2 max-h-[calc(100vh-250px)] overflow-auto pr-1">
+        <div className="panel-card self-start">
+            <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xl font-semibold text-slate-700">Secciones</h2>
+                <div className="flex items-center gap-2">
+                    <button onClick={addSection} className="toolbar-btn toolbar-btn--emerald text-sm">+ Añadir</button>
+                    <button onClick={() => setIsCollapsed(true)} className="toolbar-btn toolbar-btn--muted" title="Minimizar Panel">
+                        <IconChevronLeft />
+                    </button>
+                </div>
+            </div>
+            <div className="section-scroll space-y-3">
                 {sections.map(s => {
                     const isExpanded = expandedSections.includes(s.id);
                     return (
-                        <div key={s.id} className={`p-2 rounded-xl border ${selectedSectionId === s.id ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200'}`} onClick={() => setSelectedSectionId(s.id)}>
-                            <div className="flex items-center gap-2">
-                                <button onClick={(e) => { e.stopPropagation(); toggleSectionExpansion(s.id); }} className="p-1">{isExpanded ? <IconChevronDown /> : <IconChevronRight />}</button>
-                                <input className="flex-1 border rounded-lg px-2 py-1 text-sm" value={s.name} onChange={e => setSections(prev => prev.map(x => x.id === s.id ? { ...x, name: e.target.value } : x))} onClick={e => e.stopPropagation()} />
-                                <input type="color" className="w-8 h-8" value={s.color || '#0ea5e9'} onChange={e => setSections(prev => prev.map(x => x.id === s.id ? { ...x, color: e.target.value } : x))} onClick={e => e.stopPropagation()} />
-                                <button onClick={(e) => { e.stopPropagation(); toggleSectionVisibility(s.id); }} className={`p-1 rounded-md ${s.isVisible ? 'text-slate-600' : 'text-slate-300'}`}>{s.isVisible ? <IconEye /> : <IconEyeOff />}</button>
+                        <div
+                            key={s.id}
+                            className={`section-card ${selectedSectionId === s.id ? 'section-card--active' : ''}`}
+                            onClick={() => setSelectedSectionId(s.id)}
+                        >
+                            <div className="section-card__header px-3 py-2">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); toggleSectionExpansion(s.id); }}
+                                    className="toolbar-btn toolbar-btn--muted px-2 py-1"
+                                >
+                                    {isExpanded ? <IconChevronDown /> : <IconChevronRight />}
+                                </button>
+                                <input
+                                    className="flex-1 border border-slate-200/70 rounded-lg px-3 py-1 text-sm bg-white/80"
+                                    value={s.name}
+                                    onChange={e => setSections(prev => prev.map(x => x.id === s.id ? { ...x, name: e.target.value } : x))}
+                                    onClick={e => e.stopPropagation()}
+                                />
+                                <input
+                                    type="color"
+                                    className="w-9 h-9 rounded-lg border border-slate-200/50"
+                                    value={s.color || '#0ea5e9'}
+                                    onChange={e => setSections(prev => prev.map(x => x.id === s.id ? { ...x, color: e.target.value } : x))}
+                                    onClick={e => e.stopPropagation()}
+                                />
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); toggleSectionVisibility(s.id); }}
+                                    className={`toolbar-btn px-2 py-1 ${s.isVisible ? 'toolbar-btn--muted' : 'toolbar-btn--muted opacity-40'}`}
+                                >
+                                    {s.isVisible ? <IconEye /> : <IconEyeOff />}
+                                </button>
                             </div>
                             {isExpanded && (
-                                <div className="mt-2 pl-2 space-y-1" onDrop={() => setDraggedAction(null)} onDragEnd={() => setDraggedAction(null)}>
-                                    <div className="text-xs text-slate-500 mt-1">Inicio: {(() => { const start = computePoseUpToSection(s.id); return `${pxToUnit(start.x).toFixed(1)}cm, ${pxToUnit(start.y).toFixed(1)}cm, ${Math.round(start.theta * RAD2DEG)}°`; })()}</div>
-                                    <div className="text-xs text-slate-600 pt-2">Acciones:</div>
+                                <div className="section-card__content" onDrop={() => setDraggedAction(null)} onDragEnd={() => setDraggedAction(null)}>
+                                    <div className="text-xs text-slate-500">Inicio: {(() => { const start = computePoseUpToSection(s.id); return `${pxToUnit(start.x).toFixed(1)}cm, ${pxToUnit(start.y).toFixed(1)}cm, ${Math.round(start.theta * RAD2DEG)}°`; })()}</div>
+                                    <div className="text-xs text-slate-600 font-semibold">Acciones:</div>
                                     {s.actions.length === 0 ? (<div className="text-xs text-slate-500">Sin acciones. Dibuja para crear.</div>) : (
                                         s.actions.map((a, i) => {
                                             const isDragging = draggedAction?.sectionId === s.id && draggedAction?.actionIndex === i;
-                                            return (<div key={i} draggable onDragStart={(e) => handleActionDragStart(e, s.id, i)} onDrop={(e) => handleActionDrop(e, s.id, i)} onDragOver={(e) => e.preventDefault()} className={`grid grid-cols-[auto_auto_1fr_auto] gap-2 items-center p-1.5 border rounded-xl ${isDragging ? 'opacity-50 bg-slate-200' : 'bg-white'}`}><span className="cursor-move touch-none p-1"><IconGripVertical /></span><span className="text-xs font-medium">{a.type === 'move' ? 'Avanzar' : 'Girar'}</span>
+                                            return (
+                                                <div
+                                                    key={i}
+                                                    draggable
+                                                    onDragStart={(e) => handleActionDragStart(e, s.id, i)}
+                                                    onDrop={(e) => handleActionDrop(e, s.id, i)}
+                                                    onDragOver={(e) => e.preventDefault()}
+                                                    className={`section-card__actions ${isDragging ? 'opacity-60 border-dashed border-indigo-300' : 'border-slate-200/70'}`}
+                                                >
+                                                    <span className="cursor-move touch-none p-1 text-slate-400"><IconGripVertical /></span><span className="text-xs font-medium text-slate-600">{a.type === 'move' ? 'Avanzar' : 'Girar'}</span>
                                                 {a.type === 'move' ?
                                                     (<label className="text-xs flex items-center gap-2">Dist ({unit})<input
                                                         type="number"
                                                         step={unit === 'mm' ? 0.1 : 0.01}
-                                                        className="w-full border rounded-lg px-2 py-1"
+                                                        className="w-full border border-slate-200/80 rounded-lg px-2 py-1 text-slate-700 bg-white/80"
                                                         value={unit === 'mm' ? (a.distance * 10).toFixed(1) : a.distance.toFixed(2)}
                                                         onChange={e => {
                                                             const val = parseFloat(e.target.value) || 0;
@@ -123,7 +177,7 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
                                                     (<label className="text-xs flex items-center gap-2">Ángulo (°)<input
                                                         type="number"
                                                         step="1"
-                                                        className="w-full border rounded-lg px-2 py-1"
+                                                        className="w-full border border-slate-200/80 rounded-lg px-2 py-1 text-slate-700 bg-white/80"
                                                         value={a.angle}
                                                         onChange={e => {
                                                             const newActions = s.actions.map((act, idx) => (i === idx ? { ...act, angle: parseFloat(e.target.value) || 0 } : act));
@@ -131,7 +185,14 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
                                                         }}
                                                     /></label>)
                                                 }
-                                            <button onClick={() => { const newActions = s.actions.filter((_, idx) => idx !== i); updateSectionActions(s.id, newActions); }} className="px-2 py-1 text-[11px] rounded-lg bg-rose-100 text-rose-700">X</button></div>);
+                                            <button
+                                                onClick={() => { const newActions = s.actions.filter((_, idx) => idx !== i); updateSectionActions(s.id, newActions); }}
+                                                className="toolbar-btn toolbar-btn--rose px-2 py-1 text-[11px]"
+                                            >
+                                                Quitar
+                                            </button>
+                                                </div>
+                                            );
                                         })
                                     )}
                                 </div>
@@ -140,7 +201,13 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
                     );
                 })}
             </div>
-            <div className="pt-2 flex gap-2"><button onClick={exportMission} className="px-3 py-1.5 rounded-xl bg-amber-500 text-white text-sm shadow">Guardar (.json)</button><label className="px-3 py-1.5 rounded-xl bg-slate-200 text-slate-900 text-sm shadow cursor-pointer">Cargar <input type="file" accept="application/json" className="hidden" onChange={importMission} /></label></div>
+            <div className="pt-2 flex flex-wrap gap-2">
+                <button onClick={exportMission} className="toolbar-btn toolbar-btn--amber text-sm">Guardar (.json)</button>
+                <label className="toolbar-btn toolbar-btn--muted text-sm cursor-pointer">
+                    Cargar
+                    <input type="file" accept="application/json" className="hidden" onChange={importMission} />
+                </label>
+            </div>
         </div>
     );
 };
@@ -159,22 +226,22 @@ const Toolbar = ({ drawMode, setDrawMode, snapAngles, setSnapAngles, snapGrid, s
     };
 
     return (
-        <div className="flex flex-wrap items-center gap-2 p-3 bg-white shadow sticky top-0 z-10">
-            <button onClick={() => setDrawMode(d => !d)} className={`px-3 py-1 rounded-xl w-24 ${drawMode ? 'bg-emerald-500 text-white' : 'bg-slate-200'}`}>
+        <div className="toolbar-card sticky top-4 z-20">
+            <button onClick={() => setDrawMode(d => !d)} className={`toolbar-btn w-28 ${drawMode ? 'toolbar-btn--emerald' : 'toolbar-btn--muted'}`}>
                 {drawMode ? 'Dibujando' : 'Editando'}
             </button>
-            <button onClick={handleRulerToggle} className={`px-3 py-1 rounded-xl inline-flex items-center ${rulerActive ? 'bg-rose-500 text-white' : 'bg-slate-200'}`}>
+            <button onClick={handleRulerToggle} className={`toolbar-btn ${rulerActive ? 'toolbar-btn--rose' : 'toolbar-btn--muted'}`}>
                 <IconRuler /> Regla
             </button>
-            <button onClick={handleSnapAnglesToggle} className={`px-3 py-1 rounded-xl ${snapAngles ? 'bg-indigo-500 text-white' : 'bg-slate-200'}`}>Snap 15°</button>
-            <button onClick={handleSnapGridToggle} className={`px-3 py-1 rounded-xl ${snapGrid ? 'bg-indigo-500 text-white' : 'bg-slate-200'}`}>Snap Grid</button>
-            <div className="mx-2 w-px h-6 bg-slate-200" />
-            <button onClick={startMission} className="px-3 py-1 rounded-xl bg-blue-600 text-white">Misión</button>
-            <button onClick={startSection} className="px-3 py-1 rounded-xl bg-blue-500 text-white">Sección</button>
-            <button onClick={pauseResume} disabled={!isRunning} className={`px-3 py-1 rounded-xl ${isPaused ? 'bg-amber-500' : 'bg-amber-400'} text-white ${!isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}>{isPaused ? 'Reanudar' : 'Pausar'}</button>
-            <button onClick={stopPlayback} disabled={!isRunning} className={`px-3 py-1 rounded-xl bg-rose-500 text-white ${!isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}>Detener</button>
+            <button onClick={handleSnapAnglesToggle} className={`toolbar-btn ${snapAngles ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}>Snap 15°</button>
+            <button onClick={handleSnapGridToggle} className={`toolbar-btn ${snapGrid ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}>Snap Grid</button>
+            <div className="toolbar-divider" />
+            <button onClick={startMission} className="toolbar-btn toolbar-btn--sky">Misión</button>
+            <button onClick={startSection} className="toolbar-btn toolbar-btn--indigo">Sección</button>
+            <button onClick={pauseResume} disabled={!isRunning} className={`toolbar-btn ${isPaused ? 'toolbar-btn--emerald' : 'toolbar-btn--amber'}`}>{isPaused ? 'Reanudar' : 'Pausar'}</button>
+            <button onClick={stopPlayback} disabled={!isRunning} className="toolbar-btn toolbar-btn--rose">Detener</button>
             <div className="ml-auto flex items-center gap-2 text-sm">
-                <button onClick={() => setShowOptions(true)} className="px-3 py-1 rounded-xl bg-slate-800 text-white">Opciones</button>
+                <button onClick={() => setShowOptions(true)} className="toolbar-btn toolbar-btn--slate">Opciones</button>
             </div>
         </div>
     );
@@ -505,41 +572,39 @@ export default function WROPlaybackPlanner() {
     const importMission = (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { const data = JSON.parse(r.result); if (Array.isArray(data.sections)) setSections(data.sections.map(s => ({...s, isVisible: s.isVisible !== false}))); if (data.initialPose) setInitialPose(data.initialPose); if (data.robot) setRobot(prev => ({ ...prev, ...data.robot })); if (data.grid) setGrid(prev => ({ ...prev, ...data.grid })); if (data.fieldKey) setFieldKey(data.fieldKey); if (typeof data.bgOpacity === 'number') setBgOpacity(data.bgOpacity); } catch (err) { console.error('Invalid mission file', err); alert('No se pudo importar: archivo inválido'); } }; r.readAsText(f); };
     
     return (
-        <div className="w-full h-full min-h-screen bg-slate-50">
-            <Toolbar {...{ drawMode, setDrawMode, snapAngles, setSnapAngles, snapGrid, setSnapGrid, isRunning, isPaused, startMission, startSection, pauseResume, stopPlayback, setShowOptions, rulerActive, handleRulerToggle }} />
-
+        <div className="w-full h-full min-h-screen">
             <main className="app-shell">
-            <div className="main-grid">
-                {/* PANEL IZQUIERDO (card) */}
-                <aside className="left-panel">
-                {/* mantén la misma instancia del SectionsPanel, pero agrégale un wrapper para spacing */}
-                <div className="sections-list">
-                    <SectionsPanel {...{ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed: isSectionsPanelCollapsed, setIsCollapsed: setIsSectionsPanelCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, unit }} />
-                </div>
-                </aside>
+                <Toolbar {...{ drawMode, setDrawMode, snapAngles, setSnapAngles, snapGrid, setSnapGrid, isRunning, isPaused, startMission, startSection, pauseResume, stopPlayback, setShowOptions, rulerActive, handleRulerToggle }} />
 
-                {/* AREA DEL CANVAS (card limpia) */}
-                <section className="canvas-card" aria-label="Canvas">
-                <div ref={containerRef} style={{ width: '100%' }}>
-                    <canvas ref={canvasRef}
-                            onMouseMove={onCanvasMove}
-                            onMouseDown={onCanvasDown}
-                            onMouseUp={onCanvasUp}
-                            onMouseLeave={onCanvasUp}
-                            onClick={onCanvasClick}
-                            onContextMenu={handleContextMenu}
-                            className={`${isSettingOrigin ? 'cursor-copy' : 'cursor-crosshair'}`}
+                <div className="main-grid">
+                    {/* PANEL IZQUIERDO (card) */}
+                    <aside className="left-panel">
+                        <div className="sections-list">
+                            <SectionsPanel {...{ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed: isSectionsPanelCollapsed, setIsCollapsed: setIsSectionsPanelCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, unit }} />
+                        </div>
+                    </aside>
+
+                    {/* AREA DEL CANVAS (card limpia) */}
+                    <section className="canvas-card" aria-label="Canvas">
+                        <div ref={containerRef} style={{ width: '100%' }}>
+                            <canvas
+                                ref={canvasRef}
+                                onMouseMove={onCanvasMove}
+                                onMouseDown={onCanvasDown}
+                                onMouseUp={onCanvasUp}
+                                onMouseLeave={onCanvasUp}
+                                onClick={onCanvasClick}
+                                onContextMenu={handleContextMenu}
+                                className={`${isSettingOrigin ? 'cursor-copy' : 'cursor-crosshair'}`}
                             />
+                        </div>
+                    </section>
                 </div>
-                </section>
-            </div>
             </main>
-
-
 
             <OptionsPanel {...{ showOptions, setShowOptions, fieldKey, setFieldKey, bgOpacity, setBgOpacity, grid, setGrid, robot, setRobot, initialPose, setInitialPose, handleBgUpload, handleRobotImageUpload, setIsSettingOrigin, unit, setUnit }} />
 
-            <footer className="max-w-7xl mx-auto px-4 pb-8 pt-2 text-xs text-slate-500 text-center">Dimensiones del tapete: 2362mm × 1143mm.</footer>
+            <footer className="footer-note">Dimensiones del tapete: 2362mm × 1143mm.</footer>
         </div>
     );
 }

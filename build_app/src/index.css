@@ -14,22 +14,28 @@ html, body, #root {
   height: 100%;
 }
 body {
-  @apply bg-slate-50 text-slate-700;
+  background: linear-gradient(140deg, #e2e8f0 0%, #ffffff 45%, #e2e8f0 100%);
+  color: #334155;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   margin: 0;
+  min-height: 100vh;
 }
 
 /* Layout general (centra el contenido y le da max-width) */
 .app-shell {
   max-width: var(--page-max-w);
   margin: 0 auto;
-  padding: 1rem;
+  padding: 1.5rem 1.25rem 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
 /* --- Estilos específicos para el área principal --- */
 .main-grid {
   display: grid;
-  gap: 1rem;
+  gap: 1.25rem;
+  align-items: start;
 }
 
 /* para pantallas grandes usamos dos columnas: panel fijo + canvas flexible */
@@ -41,23 +47,26 @@ body {
 
 /* Panel izquierdo (tarjeta limpia) */
 .left-panel {
-  background: #ffffff;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(15,23,42,0.06);
-  padding: 1rem;
+  background: linear-gradient(150deg, rgba(255,255,255,0.96) 0%, rgba(241,245,249,0.92) 100%);
+  border-radius: 18px;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
+  padding: 1.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  backdrop-filter: blur(12px);
 }
 
 /* Card que contiene el canvas (look limpio / rounded / sombra) */
 .canvas-card {
-  background: #ffffff;
-  border-radius: 14px;
-  box-shadow: 0 8px 24px rgba(15,23,42,0.06);
-  padding: 18px;
+  background: linear-gradient(160deg, rgba(255,255,255,0.95) 0%, rgba(224,231,255,0.9) 100%);
+  border-radius: 22px;
+  box-shadow: 0 22px 45px rgba(79, 70, 229, 0.12);
+  padding: 24px;
   overflow: hidden;
-  min-height: 420px;
+  min-height: 460px;
   display: flex;
   align-items: stretch;
   justify-content: center;
+  border: 1px solid rgba(79, 70, 229, 0.08);
 }
 
 /* Forzar que el canvas ocupe el 100% del ancho de la card y mantener el comportamiento de resize que hace tu script */
@@ -68,4 +77,186 @@ body {
 }
 
 /* Ajustes menores visibilidad/espaciado para la lista de secciones */
-.sections-list { gap: .5rem; display:flex; flex-direction:column; }
+.sections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.toolbar-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 20px;
+  padding: 0.75rem 1.25rem;
+  box-shadow: 0 22px 45px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(14px);
+}
+
+.toolbar-divider {
+  height: 2rem;
+  width: 1px;
+  background: rgba(148, 163, 184, 0.65);
+  margin: 0 0.75rem;
+}
+
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  padding: 0.55rem 0.95rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.15);
+}
+
+.toolbar-btn:hover {
+  transform: translateY(-1px);
+}
+
+.toolbar-btn--muted {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.toolbar-btn--muted:hover {
+  background: #cbd5f5;
+}
+
+.toolbar-btn--emerald {
+  background: #34d399;
+  color: #ffffff;
+}
+
+.toolbar-btn--emerald:hover {
+  background: #10b981;
+}
+
+.toolbar-btn--rose {
+  background: #fb7185;
+  color: #ffffff;
+}
+
+.toolbar-btn--rose:hover {
+  background: #f43f5e;
+}
+
+.toolbar-btn--indigo {
+  background: #6366f1;
+  color: #ffffff;
+}
+
+.toolbar-btn--indigo:hover {
+  background: #4f46e5;
+}
+
+.toolbar-btn--sky {
+  background: #0ea5e9;
+  color: #ffffff;
+}
+
+.toolbar-btn--sky:hover {
+  background: #0284c7;
+}
+
+.toolbar-btn--amber {
+  background: #f59e0b;
+  color: #ffffff;
+}
+
+.toolbar-btn--amber:hover {
+  background: #d97706;
+}
+
+.toolbar-btn--slate {
+  background: #1e293b;
+  color: #ffffff;
+}
+
+.toolbar-btn--slate:hover {
+  background: #0f172a;
+}
+
+.toolbar-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.panel-card {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 24px;
+  box-shadow: 0 30px 60px rgba(15, 23, 42, 0.16);
+  padding: 1.25rem;
+  backdrop-filter: blur(18px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.section-card {
+  border-radius: 18px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.section-card:hover {
+  transform: translateY(-2px);
+}
+
+.section-card--active {
+  border-color: rgba(52, 211, 153, 0.65);
+  background: rgba(236, 253, 245, 0.9);
+  box-shadow: 0 18px 36px rgba(16, 185, 129, 0.2);
+}
+
+.section-card__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.section-card__content {
+  margin-top: 0.75rem;
+  padding-left: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.section-card__actions {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.4rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(226, 232, 240, 0.7);
+}
+
+.section-scroll {
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.footer-note {
+  text-align: center;
+  font-size: 0.75rem;
+  color: rgba(100, 116, 139, 0.75);
+  margin-top: 1.5rem;
+  margin-bottom: 2.5rem;
+}
