@@ -70,7 +70,8 @@ const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOp
         setGrid(g => ({ ...g, cellSize: Math.max(0.1, Math.min(5, cmValue)) }));
     };
 
-    const displayCellSize = isMM ? (grid.cellSize * 10).toFixed(1) : grid.cellSize.toFixed(2);
+    const numericCellSize = isMM ? grid.cellSize * 10 : grid.cellSize;
+    const formattedCellSize = isMM ? numericCellSize.toFixed(1) : numericCellSize.toFixed(2);
 
     return (
         <div className={`options-overlay ${showOptions ? 'options-overlay--visible' : ''}`} aria-hidden={!showOptions}>
@@ -85,19 +86,268 @@ const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOp
                 aria-modal="true"
                 onClick={(e) => e.stopPropagation()}
             >
-                <div className="flex items-center justify-between mb-2"><h3 className="text-lg font-semibold">Opciones</h3><button className="px-2 py-1 rounded bg-slate-100" onClick={() => setShowOptions(false)}>Cerrar</button></div>
-                <div className="text-sm text-slate-600 mb-2">El tapete se escala a <b>2362mm × 1143mm</b>.</div>
-                <div className="space-y-3">
-                    <div><div className="font-medium">Campo</div><select className="border rounded px-2 py-1 w-full mt-1" value={fieldKey} onChange={e => setFieldKey(e.target.value)}>{FIELD_PRESETS.map(p => <option key={p.key} value={p.key}>{p.name}</option>)}</select><label className="block mt-2 text-sm">Fondo <input type="file" accept="image/*" className="text-xs" onChange={handleBgUpload} /></label><label className="block mt-2 text-sm">Opacidad fondo: {Math.round(bgOpacity * 100)}%<input type="range" min={0} max={1} step={0.05} value={bgOpacity} onChange={e => setBgOpacity(Number(e.target.value))} className="w-full" /></label></div>
-                    <div className="border-t pt-3 space-y-2">
-                        <div className="flex justify-between items-center"><div className="font-medium">Cuadrícula</div><button onClick={() => setUnit(u => u === 'cm' ? 'mm' : 'cm')} className="px-3 py-1 rounded-lg bg-slate-200 text-sm">Usar {unit === 'cm' ? 'mm' : 'cm'}</button></div>
-                        <button onClick={() => { setIsSettingOrigin(true); setShowOptions(false); }} className="w-full px-3 py-1.5 rounded-xl bg-indigo-500 text-white text-sm inline-flex items-center justify-center"><IconTarget /> Fijar Origen en Mapa</button>
-                        <div><label className="block text-sm">Tamaño: {displayCellSize} {unit}</label><div className="flex items-center gap-2"><input type="range" min={sizeMin} max={sizeMax} step={sliderStep} className="w-full" value={displayCellSize} onChange={e => handleSizeChange(e.target.value)} /><input type="number" min={sizeMin} max={sizeMax} step={numberStep} className="w-20 border rounded px-2 py-1 text-sm" value={displayCellSize} onChange={e => handleSizeChange(e.target.value)} /></div></div>
-                        <div><label className="block text-sm">Opacidad: {Math.round(grid.lineAlpha * 100)}%</label><input type="range" min={0} max={1} step={0.05} value={grid.lineAlpha} onChange={e => setGrid(g => ({ ...g, lineAlpha: Number(e.target.value) }))} className="w-full" /></div>
-                        <div><label className="block text-sm">Offset X: {grid.offsetX}px</label><div className="flex items-center gap-2"><input type="range" min="-100" max="100" step="1" className="w-full" value={grid.offsetX} onChange={e => setGrid(g => ({ ...g, offsetX: Number(e.target.value) }))} /><input type="number" step="1" className="w-20 border rounded px-2 py-1 text-sm" value={grid.offsetX} onChange={e => setGrid(g => ({ ...g, offsetX: Number(e.target.value) }))} /></div></div>
-                        <div><label className="block text-sm">Offset Y: {grid.offsetY}px</label><div className="flex items-center gap-2"><input type="range" min="-100" max="100" step="1" className="w-full" value={grid.offsetY} onChange={e => setGrid(g => ({ ...g, offsetY: Number(e.target.value) }))} /><input type="number" step="1" className="w-20 border rounded px-2 py-1 text-sm" value={grid.offsetY} onChange={e => setGrid(g => ({ ...g, offsetY: Number(e.target.value) }))} /></div></div>
+                <div className="options-drawer__header">
+                    <div>
+                        <h3 className="options-drawer__title">Opciones</h3>
+                        <p className="options-drawer__subtitle">Configura el tapete, la cuadrícula y el robot para organizar mejor tu planificación.</p>
                     </div>
-                    <div className="border-t pt-3"><div className="font-medium">Robot</div><div className="grid grid-cols-2 gap-2"><label className="text-sm">Ancho (cm)<input type="number" className="w-full border rounded px-2 py-1" value={robot.width} onChange={e => setRobot(r => ({ ...r, width: Number(e.target.value) || 0 }))} /></label><label className="text-sm">Largo (cm)<input type="number" className="w-full border rounded px-2 py-1" value={robot.length} onChange={e => setRobot(r => ({ ...r, length: Number(e.target.value) || 0 }))} /></label><label className="text-sm">Color<input type="color" className="w-full h-8 border-0" value={robot.color} onChange={e => setRobot(r => ({ ...r, color: e.target.value }))} /></label><label className="text-sm">Imagen<input type="file" accept="image/*" className="text-xs" onChange={handleRobotImageUpload} /></label><label className="col-span-2 text-sm">Opacidad: {Math.round((robot.opacity ?? 1) * 100)}%<input type="range" min={0.1} max={1} step={0.05} value={robot.opacity ?? 1} onChange={e => setRobot(r => ({ ...r, opacity: Number(e.target.value) }))} className="w-full" /></label></div><div className="grid grid-cols-3 gap-2 mt-2 text-sm"><label>X (px)<input type="number" className="w-full border rounded px-2 py-1" value={Math.round(initialPose.x)} onChange={e => setInitialPose(p => ({ ...p, x: Number(e.target.value) }))} /></label><label>Y (px)<input type="number" className="w-full border rounded px-2 py-1" value={Math.round(initialPose.y)} onChange={e => setInitialPose(p => ({ ...p, y: Number(e.target.value) }))} /></label><label>Ángulo (°)<input type="number" className="w-full border rounded px-2 py-1" value={Math.round(initialPose.theta * RAD2DEG)} onChange={e => setInitialPose(p => ({ ...p, theta: Number(e.target.value) * DEG2RAD }))} /></label></div></div>
+                    <button className="options-close-btn" onClick={() => setShowOptions(false)}>Cerrar</button>
+                </div>
+                <div className="options-drawer__intro">El tapete se escala automáticamente a <b>2362mm × 1143mm</b>. Ajusta los controles para que coincida con tu entorno.</div>
+                <div className="options-drawer__content">
+                    <section className="option-section">
+                        <header className="option-section__header">
+                            <h4 className="option-section__title">Tapete</h4>
+                            <p className="option-section__subtitle">Elige un tapete predefinido o sube una imagen personalizada.</p>
+                        </header>
+                        <div className="option-card">
+                            <div className="option-card__grid option-card__grid--auto">
+                                <label className="option-field">
+                                    <span className="option-field__label">Tapete base</span>
+                                    <select className="option-field__control" value={fieldKey} onChange={e => setFieldKey(e.target.value)}>
+                                        {FIELD_PRESETS.map(p => (
+                                            <option key={p.key} value={p.key}>{p.name}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <label className="option-field option-field--file">
+                                    <span className="option-field__label">Fondo personalizado</span>
+                                    <span className="option-upload">
+                                        <input type="file" accept="image/*" onChange={handleBgUpload} />
+                                        <span className="option-upload__text">Subir imagen</span>
+                                    </span>
+                                    <span className="option-field__hint">Ideal para mapas escaneados o fotografías de tu tapete.</span>
+                                </label>
+                                <div className="option-field option-field--range">
+                                    <div className="option-field__label">Opacidad del fondo</div>
+                                    <div className="option-field__controls">
+                                        <input type="range" min={0} max={1} step={0.05} value={bgOpacity} onChange={e => setBgOpacity(Number(e.target.value))} />
+                                        <span className="option-field__value">{Math.round(bgOpacity * 100)}%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="option-section">
+                        <header className="option-section__header">
+                            <h4 className="option-section__title">Cuadrícula y unidades</h4>
+                            <p className="option-section__subtitle">Controla la densidad de la cuadrícula y alinea el origen con tu referencia física.</p>
+                        </header>
+                        <div className="option-card">
+                            <div className="option-card__grid option-card__grid--two">
+                                <div className="option-field">
+                                    <span className="option-field__label">Unidad de trabajo</span>
+                                    <div className="option-field__controls option-field__controls--single">
+                                        <button
+                                            type="button"
+                                            className="option-chip-button"
+                                            onClick={() => setUnit(u => u === 'cm' ? 'mm' : 'cm')}
+                                        >
+                                            Mostrar en {unit === 'cm' ? 'milímetros' : 'centímetros'}
+                                        </button>
+                                    </div>
+                                    <span className="option-field__hint">Actualmente estás introduciendo valores en {unit === 'cm' ? 'centímetros' : 'milímetros'}.</span>
+                                </div>
+                                <div className="option-field">
+                                    <span className="option-field__label">Origen de coordenadas</span>
+                                    <div className="option-field__controls option-field__controls--single">
+                                        <button
+                                            type="button"
+                                            className="option-action-button"
+                                            onClick={() => { setIsSettingOrigin(true); setShowOptions(false); }}
+                                        >
+                                            <IconTarget /> Fijar en el mapa
+                                        </button>
+                                    </div>
+                                    <span className="option-field__hint">Pulsa sobre el tapete para definir dónde se ubica (0, 0).</span>
+                                </div>
+                            </div>
+                            <div className="option-divider" />
+                            <div className="option-field option-field--range">
+                                <div className="option-field__label">Tamaño de celda</div>
+                                <span className="option-field__hint">Cada cuadrícula representa {formattedCellSize} {unit}.</span>
+                                <div className="option-field__controls">
+                                    <input
+                                        type="range"
+                                        min={sizeMin}
+                                        max={sizeMax}
+                                        step={sliderStep}
+                                        value={numericCellSize}
+                                        onChange={e => handleSizeChange(e.target.value)}
+                                    />
+                                    <input
+                                        type="number"
+                                        min={sizeMin}
+                                        max={sizeMax}
+                                        step={numberStep}
+                                        className="option-number"
+                                        value={Number(numericCellSize.toFixed(isMM ? 1 : 2))}
+                                        onChange={e => handleSizeChange(e.target.value)}
+                                    />
+                                    <span className="option-field__value">{unit}</span>
+                                </div>
+                            </div>
+                            <div className="option-field option-field--range">
+                                <div className="option-field__label">Opacidad de líneas</div>
+                                <div className="option-field__controls">
+                                    <input
+                                        type="range"
+                                        min={0}
+                                        max={1}
+                                        step={0.05}
+                                        value={grid.lineAlpha}
+                                        onChange={e => setGrid(g => ({ ...g, lineAlpha: Number(e.target.value) }))}
+                                    />
+                                    <span className="option-field__value">{Math.round(grid.lineAlpha * 100)}%</span>
+                                </div>
+                            </div>
+                            <div className="option-card__grid option-card__grid--two">
+                                <div className="option-field option-field--range">
+                                    <div className="option-field__label">Offset X</div>
+                                    <span className="option-field__hint">Desplaza la cuadrícula horizontalmente.</span>
+                                    <div className="option-field__controls">
+                                        <input
+                                            type="range"
+                                            min="-100"
+                                            max="100"
+                                            step="1"
+                                            value={grid.offsetX}
+                                            onChange={e => setGrid(g => ({ ...g, offsetX: Number(e.target.value) }))}
+                                        />
+                                        <input
+                                            type="number"
+                                            step="1"
+                                            className="option-number"
+                                            value={grid.offsetX}
+                                            onChange={e => setGrid(g => ({ ...g, offsetX: Number(e.target.value) }))}
+                                        />
+                                        <span className="option-field__value">px</span>
+                                    </div>
+                                </div>
+                                <div className="option-field option-field--range">
+                                    <div className="option-field__label">Offset Y</div>
+                                    <span className="option-field__hint">Desplaza la cuadrícula verticalmente.</span>
+                                    <div className="option-field__controls">
+                                        <input
+                                            type="range"
+                                            min="-100"
+                                            max="100"
+                                            step="1"
+                                            value={grid.offsetY}
+                                            onChange={e => setGrid(g => ({ ...g, offsetY: Number(e.target.value) }))}
+                                        />
+                                        <input
+                                            type="number"
+                                            step="1"
+                                            className="option-number"
+                                            value={grid.offsetY}
+                                            onChange={e => setGrid(g => ({ ...g, offsetY: Number(e.target.value) }))}
+                                        />
+                                        <span className="option-field__value">px</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="option-section">
+                        <header className="option-section__header">
+                            <h4 className="option-section__title">Robot</h4>
+                            <p className="option-section__subtitle">Define las dimensiones y apariencia del robot en pantalla.</p>
+                        </header>
+                        <div className="option-card">
+                            <div className="option-card__grid option-card__grid--two">
+                                <label className="option-field">
+                                    <span className="option-field__label">Ancho (cm)</span>
+                                    <input
+                                        type="number"
+                                        className="option-field__control"
+                                        value={robot.width}
+                                        onChange={e => setRobot(r => ({ ...r, width: Number(e.target.value) || 0 }))}
+                                    />
+                                </label>
+                                <label className="option-field">
+                                    <span className="option-field__label">Largo (cm)</span>
+                                    <input
+                                        type="number"
+                                        className="option-field__control"
+                                        value={robot.length}
+                                        onChange={e => setRobot(r => ({ ...r, length: Number(e.target.value) || 0 }))}
+                                    />
+                                </label>
+                                <label className="option-field">
+                                    <span className="option-field__label">Color</span>
+                                    <input
+                                        type="color"
+                                        className="option-field__control option-field__control--color"
+                                        value={robot.color}
+                                        onChange={e => setRobot(r => ({ ...r, color: e.target.value }))}
+                                    />
+                                </label>
+                                <label className="option-field option-field--file">
+                                    <span className="option-field__label">Imagen del robot</span>
+                                    <span className="option-upload">
+                                        <input type="file" accept="image/*" onChange={handleRobotImageUpload} />
+                                        <span className="option-upload__text">Seleccionar archivo</span>
+                                    </span>
+                                    <span className="option-field__hint">Utiliza PNG con fondo transparente para mejores resultados.</span>
+                                </label>
+                            </div>
+                            <div className="option-field option-field--range">
+                                <div className="option-field__label">Opacidad del robot</div>
+                                <div className="option-field__controls">
+                                    <input
+                                        type="range"
+                                        min={0.1}
+                                        max={1}
+                                        step={0.05}
+                                        value={robot.opacity ?? 1}
+                                        onChange={e => setRobot(r => ({ ...r, opacity: Number(e.target.value) }))}
+                                    />
+                                    <span className="option-field__value">{Math.round((robot.opacity ?? 1) * 100)}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="option-section">
+                        <header className="option-section__header">
+                            <h4 className="option-section__title">Posición inicial</h4>
+                            <p className="option-section__subtitle">Ajusta la ubicación inicial del robot en el plano.</p>
+                        </header>
+                        <div className="option-card">
+                            <div className="option-card__grid option-card__grid--three">
+                                <label className="option-field">
+                                    <span className="option-field__label">Posición X (px)</span>
+                                    <input
+                                        type="number"
+                                        className="option-field__control"
+                                        value={Math.round(initialPose.x)}
+                                        onChange={e => setInitialPose(p => ({ ...p, x: Number(e.target.value) }))}
+                                    />
+                                </label>
+                                <label className="option-field">
+                                    <span className="option-field__label">Posición Y (px)</span>
+                                    <input
+                                        type="number"
+                                        className="option-field__control"
+                                        value={Math.round(initialPose.y)}
+                                        onChange={e => setInitialPose(p => ({ ...p, y: Number(e.target.value) }))}
+                                    />
+                                </label>
+                                <label className="option-field">
+                                    <span className="option-field__label">Ángulo (°)</span>
+                                    <input
+                                        type="number"
+                                        className="option-field__control"
+                                        value={Math.round(initialPose.theta * RAD2DEG)}
+                                        onChange={e => setInitialPose(p => ({ ...p, theta: Number(e.target.value) * DEG2RAD }))}
+                                    />
+                                </label>
+                            </div>
+                        </div>
+                    </section>
                 </div>
             </div>
         </div>
