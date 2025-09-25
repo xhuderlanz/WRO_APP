@@ -46,6 +46,24 @@ const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOp
     const sliderStep = isMM ? 1 : 0.1;
     const numberStep = isMM ? 0.1 : 0.01;
 
+    useEffect(() => {
+        if (!showOptions) return undefined;
+        const previousOverflow = document.body.style.overflow;
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                setShowOptions(false);
+            }
+        };
+
+        document.body.style.overflow = 'hidden';
+        window.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.body.style.overflow = previousOverflow;
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [showOptions, setShowOptions]);
+
     const handleSizeChange = (valueStr) => {
         const value = parseFloat(valueStr) || 0;
         const cmValue = isMM ? value / 10 : value;
@@ -55,18 +73,17 @@ const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOp
     const displayCellSize = isMM ? (grid.cellSize * 10).toFixed(1) : grid.cellSize.toFixed(2);
 
     return (
-        <div className={`fixed inset-0 z-50 ${showOptions ? '' : 'pointer-events-none'}`}>
+        <div className={`options-overlay ${showOptions ? 'options-overlay--visible' : ''}`} aria-hidden={!showOptions}>
             <div
-                className={`absolute inset-0 bg-black/40 transition-opacity ${showOptions ? 'opacity-100' : 'opacity-0'}`}
-                onMouseDown={() => setShowOptions(false)}
-                onTouchStart={() => setShowOptions(false)}
+                className="options-overlay__backdrop"
+                onClick={() => setShowOptions(false)}
+                role="presentation"
             />
             <div
-                className={`absolute right-0 top-0 h-full w-full max-w-sm bg-white shadow-2xl p-4 overflow-y-auto transition-transform ${showOptions ? 'translate-x-0' : 'translate-x-full'}`}
+                className="options-drawer"
                 role="dialog"
                 aria-modal="true"
-                onMouseDown={(e) => e.stopPropagation()}
-                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between mb-2"><h3 className="text-lg font-semibold">Opciones</h3><button className="px-2 py-1 rounded bg-slate-100" onClick={() => setShowOptions(false)}>Cerrar</button></div>
                 <div className="text-sm text-slate-600 mb-2">El tapete se escala a <b>2362mm × 1143mm</b>.</div>
