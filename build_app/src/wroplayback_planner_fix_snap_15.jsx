@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import juniorFieldImg from "./WRO-2025-GameMat-Junior2025.jpg";
-import elementaryFieldImg from "./WRO-2025-GameMat-Elementary2025.jpg";
-import doubleTennisFieldImg from "./WRO-2025_RoboSports_Double-Tennis_Playfield.jpg";
+import juniorFieldImg from "./assets/WRO-2025-GameMat-Junior2025.jpg";
+import elementaryFieldImg from "./assets/WRO-2025-GameMat-Elementary2025.jpg";
+import doubleTennisFieldImg from "./assets/WRO-2025_RoboSports_Double-Tennis_Playfield.jpg";
+
 
 // WRO Mission Planner – Reproducción (v18 - Snap 15° corregido)
 // - Corregido: el botón "Snap 15°" ahora también constriñe la POSICIÓN del punto dibujado,
@@ -507,13 +508,34 @@ export default function WROPlaybackPlanner() {
         <div className="w-full h-full min-h-screen bg-slate-50">
             <Toolbar {...{ drawMode, setDrawMode, snapAngles, setSnapAngles, snapGrid, setSnapGrid, isRunning, isPaused, startMission, startSection, pauseResume, stopPlayback, setShowOptions, rulerActive, handleRulerToggle }} />
 
-            <main className={`max-w-full mx-auto p-3 grid grid-cols-1 ${isSectionsPanelCollapsed ? 'lg:grid-cols-[auto_1fr]' : 'lg:grid-cols-[420px_1fr]'} gap-3 transition-all duration-300`}>
-                <SectionsPanel {...{ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed: isSectionsPanelCollapsed, setIsCollapsed: setIsSectionsPanelCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, unit }} />
-                
-                <div ref={containerRef} className="bg-white rounded-2xl shadow overflow-hidden">
-                    <canvas ref={canvasRef} onMouseMove={onCanvasMove} onMouseDown={onCanvasDown} onMouseUp={onCanvasUp} onMouseLeave={onCanvasUp} onClick={onCanvasClick} onContextMenu={handleContextMenu} className={`w-full block ${isSettingOrigin ? 'cursor-copy' : 'cursor-crosshair'}`} style={{ display: 'block' }} />
+            <main className="app-shell">
+            <div className="main-grid">
+                {/* PANEL IZQUIERDO (card) */}
+                <aside className="left-panel">
+                {/* mantén la misma instancia del SectionsPanel, pero agrégale un wrapper para spacing */}
+                <div className="sections-list">
+                    <SectionsPanel {...{ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed: isSectionsPanelCollapsed, setIsCollapsed: setIsSectionsPanelCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, unit }} />
                 </div>
+                </aside>
+
+                {/* AREA DEL CANVAS (card limpia) */}
+                <section className="canvas-card" aria-label="Canvas">
+                <div ref={containerRef} style={{ width: '100%' }}>
+                    <canvas ref={canvasRef}
+                            onMouseMove={onCanvasMove}
+                            onMouseDown={onCanvasDown}
+                            onMouseUp={onCanvasUp}
+                            onMouseLeave={onCanvasUp}
+                            onClick={onCanvasClick}
+                            onContextMenu={handleContextMenu}
+                            className={`${isSettingOrigin ? 'cursor-copy' : 'cursor-crosshair'}`}
+                            />
+                </div>
+                </section>
+            </div>
             </main>
+
+
 
             <OptionsPanel {...{ showOptions, setShowOptions, fieldKey, setFieldKey, bgOpacity, setBgOpacity, grid, setGrid, robot, setRobot, initialPose, setInitialPose, handleBgUpload, handleRobotImageUpload, setIsSettingOrigin, unit, setUnit }} />
 
