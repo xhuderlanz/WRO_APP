@@ -29,6 +29,7 @@ const FIELD_PRESETS = [
 ];
 const DEFAULT_GRID = { cellSize: 1, pixelsPerUnit: 5, lineAlpha: 0.35, offsetX: 0, offsetY: 0 };
 const DEFAULT_ROBOT = { width: 18, length: 20, color: "#0ea5e9", imageSrc: null, opacity: 1 };
+const DEFAULT_INITIAL_POSE = { x: 120, y: 120, theta: 0 };
 
 const IconChevronLeft = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>;
 const IconChevronRight = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>;
@@ -39,7 +40,7 @@ const IconEyeOff = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" heig
 const IconRuler = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L3 8.4a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0L15.3 21.3"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>;
 const IconTarget = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>;
 
-const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOpacity, setBgOpacity, grid, setGrid, robot, setRobot, initialPose, setInitialPose, handleBgUpload, handleRobotImageUpload, setIsSettingOrigin, unit, setUnit }) => {
+const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOpacity, setBgOpacity, grid, setGrid, robot, setRobot, initialPose, setInitialPose, handleBgUpload, handleRobotImageUpload, setIsSettingOrigin, unit, setUnit, onResetGrid = () => {}, onResetRobot = () => {}, onResetInitialPose = () => {} }) => {
     const isMM = unit === 'mm';
     const sizeMin = isMM ? 1 : 0.1;
     const sizeMax = isMM ? 50 : 5;
@@ -63,14 +64,41 @@ const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOp
                 <div className="space-y-3">
                     <div><div className="font-medium">Campo</div><select className="border rounded px-2 py-1 w-full mt-1" value={fieldKey} onChange={e => setFieldKey(e.target.value)}>{FIELD_PRESETS.map(p => <option key={p.key} value={p.key}>{p.name}</option>)}</select><label className="block mt-2 text-sm">Fondo <input type="file" accept="image/*" className="text-xs" onChange={handleBgUpload} /></label><label className="block mt-2 text-sm">Opacidad fondo: {Math.round(bgOpacity * 100)}%<input type="range" min={0} max={1} step={0.05} value={bgOpacity} onChange={e => setBgOpacity(Number(e.target.value))} className="w-full" /></label></div>
                     <div className="border-t pt-3 space-y-2">
-                        <div className="flex justify-between items-center"><div className="font-medium">Cuadrícula</div><button onClick={() => setUnit(u => u === 'cm' ? 'mm' : 'cm')} className="px-3 py-1 rounded-lg bg-slate-200 text-sm">Usar {unit === 'cm' ? 'mm' : 'cm'}</button></div>
+                        <div className="flex justify-between items-center gap-2">
+                            <div className="font-medium">Cuadrícula</div>
+                            <div className="flex items-center gap-2">
+                                <button type="button" onClick={onResetGrid} className="px-3 py-1 rounded-lg bg-slate-100 text-sm border border-slate-200">Restablecer</button>
+                                <button type="button" onClick={() => setUnit(u => u === 'cm' ? 'mm' : 'cm')} className="px-3 py-1 rounded-lg bg-slate-200 text-sm">Usar {unit === 'cm' ? 'mm' : 'cm'}</button>
+                            </div>
+                        </div>
                         <button onClick={() => { setIsSettingOrigin(true); setShowOptions(false); }} className="w-full px-3 py-1.5 rounded-xl bg-indigo-500 text-white text-sm inline-flex items-center justify-center"><IconTarget /> Fijar Origen en Mapa</button>
                         <div><label className="block text-sm">Tamaño: {displayCellSize} {unit}</label><div className="flex items-center gap-2"><input type="range" min={sizeMin} max={sizeMax} step={sliderStep} className="w-full" value={displayCellSize} onChange={e => handleSizeChange(e.target.value)} /><input type="number" min={sizeMin} max={sizeMax} step={numberStep} className="w-20 border rounded px-2 py-1 text-sm" value={displayCellSize} onChange={e => handleSizeChange(e.target.value)} /></div></div>
                         <div><label className="block text-sm">Opacidad: {Math.round(grid.lineAlpha * 100)}%</label><input type="range" min={0} max={1} step={0.05} value={grid.lineAlpha} onChange={e => setGrid(g => ({ ...g, lineAlpha: Number(e.target.value) }))} className="w-full" /></div>
                         <div><label className="block text-sm">Offset X: {grid.offsetX}px</label><div className="flex items-center gap-2"><input type="range" min="-100" max="100" step="1" className="w-full" value={grid.offsetX} onChange={e => setGrid(g => ({ ...g, offsetX: Number(e.target.value) }))} /><input type="number" step="1" className="w-20 border rounded px-2 py-1 text-sm" value={grid.offsetX} onChange={e => setGrid(g => ({ ...g, offsetX: Number(e.target.value) }))} /></div></div>
                         <div><label className="block text-sm">Offset Y: {grid.offsetY}px</label><div className="flex items-center gap-2"><input type="range" min="-100" max="100" step="1" className="w-full" value={grid.offsetY} onChange={e => setGrid(g => ({ ...g, offsetY: Number(e.target.value) }))} /><input type="number" step="1" className="w-20 border rounded px-2 py-1 text-sm" value={grid.offsetY} onChange={e => setGrid(g => ({ ...g, offsetY: Number(e.target.value) }))} /></div></div>
                     </div>
-                    <div className="border-t pt-3"><div className="font-medium">Robot</div><div className="grid grid-cols-2 gap-2"><label className="text-sm">Ancho (cm)<input type="number" className="w-full border rounded px-2 py-1" value={robot.width} onChange={e => setRobot(r => ({ ...r, width: Number(e.target.value) || 0 }))} /></label><label className="text-sm">Largo (cm)<input type="number" className="w-full border rounded px-2 py-1" value={robot.length} onChange={e => setRobot(r => ({ ...r, length: Number(e.target.value) || 0 }))} /></label><label className="text-sm">Color<input type="color" className="w-full h-8 border-0" value={robot.color} onChange={e => setRobot(r => ({ ...r, color: e.target.value }))} /></label><label className="text-sm">Imagen<input type="file" accept="image/*" className="text-xs" onChange={handleRobotImageUpload} /></label><label className="col-span-2 text-sm">Opacidad: {Math.round((robot.opacity ?? 1) * 100)}%<input type="range" min={0.1} max={1} step={0.05} value={robot.opacity ?? 1} onChange={e => setRobot(r => ({ ...r, opacity: Number(e.target.value) }))} className="w-full" /></label></div><div className="grid grid-cols-3 gap-2 mt-2 text-sm"><label>X (px)<input type="number" className="w-full border rounded px-2 py-1" value={Math.round(initialPose.x)} onChange={e => setInitialPose(p => ({ ...p, x: Number(e.target.value) }))} /></label><label>Y (px)<input type="number" className="w-full border rounded px-2 py-1" value={Math.round(initialPose.y)} onChange={e => setInitialPose(p => ({ ...p, y: Number(e.target.value) }))} /></label><label>Ángulo (°)<input type="number" className="w-full border rounded px-2 py-1" value={Math.round(initialPose.theta * RAD2DEG)} onChange={e => setInitialPose(p => ({ ...p, theta: Number(e.target.value) * DEG2RAD }))} /></label></div></div>
+                    <div className="border-t pt-3">
+                        <div className="flex justify-between items-center gap-2">
+                            <div className="font-medium">Robot</div>
+                            <button type="button" onClick={onResetRobot} className="px-3 py-1 rounded-lg bg-slate-100 text-sm border border-slate-200">Restablecer</button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                            <label className="text-sm">Ancho (cm)<input type="number" className="w-full border rounded px-2 py-1" value={robot.width} onChange={e => setRobot(r => ({ ...r, width: Number(e.target.value) || 0 }))} /></label>
+                            <label className="text-sm">Largo (cm)<input type="number" className="w-full border rounded px-2 py-1" value={robot.length} onChange={e => setRobot(r => ({ ...r, length: Number(e.target.value) || 0 }))} /></label>
+                            <label className="text-sm">Color<input type="color" className="w-full h-8 border-0" value={robot.color} onChange={e => setRobot(r => ({ ...r, color: e.target.value }))} /></label>
+                            <label className="text-sm">Imagen<input type="file" accept="image/*" className="text-xs" onChange={handleRobotImageUpload} /></label>
+                            <label className="col-span-2 text-sm">Opacidad: {Math.round((robot.opacity ?? 1) * 100)}%<input type="range" min={0.1} max={1} step={0.05} value={robot.opacity ?? 1} onChange={e => setRobot(r => ({ ...r, opacity: Number(e.target.value) }))} className="w-full" /></label>
+                        </div>
+                        <div className="flex justify-between items-center mt-3 text-xs text-slate-500">
+                            <span>Pose inicial (px)</span>
+                            <button type="button" onClick={onResetInitialPose} className="px-2 py-1 rounded bg-slate-100 border border-slate-200 text-[11px] text-slate-700">Restablecer</button>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 mt-2 text-sm">
+                            <label>X<input type="number" className="w-full border rounded px-2 py-1" value={Math.round(initialPose.x)} onChange={e => setInitialPose(p => ({ ...p, x: Number(e.target.value) }))} /></label>
+                            <label>Y<input type="number" className="w-full border rounded px-2 py-1" value={Math.round(initialPose.y)} onChange={e => setInitialPose(p => ({ ...p, y: Number(e.target.value) }))} /></label>
+                            <label>Ángulo (°)<input type="number" className="w-full border rounded px-2 py-1" value={Math.round(initialPose.theta * RAD2DEG)} onChange={e => setInitialPose(p => ({ ...p, theta: Number(e.target.value) * DEG2RAD }))} /></label>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -190,7 +218,7 @@ export default function WROPlaybackPlanner() {
     const [sections, setSections] = useState([{ id: uid('sec'), name: 'Sección 1', points: [], actions: [], color: DEFAULT_ROBOT.color, isVisible: true }]);
     const [selectedSectionId, setSelectedSectionId] = useState(sections[0].id);
     const [expandedSections, setExpandedSections] = useState([sections[0].id]);
-    const [initialPose, setInitialPose] = useState({ x: 120, y: 120, theta: 0 });
+    const [initialPose, setInitialPose] = useState({ ...DEFAULT_INITIAL_POSE });
     const [playPose, setPlayPose] = useState({ ...initialPose });
     const [drawMode, setDrawMode] = useState(true);
     const [snapGrid, setSnapGrid] = useState(true);
@@ -208,6 +236,26 @@ export default function WROPlaybackPlanner() {
     const [isDraggingRuler, setIsDraggingRuler] = useState(false);
     const [isSettingOrigin, setIsSettingOrigin] = useState(false);
     const [unit, setUnit] = useState('cm');
+
+    const resetGrid = useCallback(() => {
+        setGrid(g => ({
+            ...g,
+            cellSize: DEFAULT_GRID.cellSize,
+            lineAlpha: DEFAULT_GRID.lineAlpha,
+            offsetX: DEFAULT_GRID.offsetX,
+            offsetY: DEFAULT_GRID.offsetY,
+        }));
+        setUnit('cm');
+    }, [setGrid, setUnit]);
+
+    const resetRobot = useCallback(() => {
+        setRobot({ ...DEFAULT_ROBOT });
+    }, [setRobot]);
+
+    const resetInitialPose = useCallback(() => {
+        setInitialPose({ ...DEFAULT_INITIAL_POSE });
+        setPlayPose({ ...DEFAULT_INITIAL_POSE });
+    }, [setInitialPose, setPlayPose]);
 
     const animRef = useRef(0);
     const actionCursorRef = useRef({ list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0 });
@@ -537,7 +585,7 @@ export default function WROPlaybackPlanner() {
 
 
 
-            <OptionsPanel {...{ showOptions, setShowOptions, fieldKey, setFieldKey, bgOpacity, setBgOpacity, grid, setGrid, robot, setRobot, initialPose, setInitialPose, handleBgUpload, handleRobotImageUpload, setIsSettingOrigin, unit, setUnit }} />
+            <OptionsPanel {...{ showOptions, setShowOptions, fieldKey, setFieldKey, bgOpacity, setBgOpacity, grid, setGrid, robot, setRobot, initialPose, setInitialPose, handleBgUpload, handleRobotImageUpload, setIsSettingOrigin, unit, setUnit, onResetGrid: resetGrid, onResetRobot: resetRobot, onResetInitialPose: resetInitialPose }} />
 
             <footer className="max-w-7xl mx-auto px-4 pb-8 pt-2 text-xs text-slate-500 text-center">Dimensiones del tapete: 2362mm × 1143mm.</footer>
         </div>
