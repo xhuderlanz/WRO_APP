@@ -511,6 +511,7 @@ const Toolbar = ({
     const [menuInfo, setMenuInfo] = useState(null);
     const longPressTimerRef = useRef(null);
     const longPressTriggeredRef = useRef(false);
+    const activePointerIdRef = useRef(null);
 
     const clearLongPress = useCallback(() => {
         if (longPressTimerRef.current) {
@@ -525,9 +526,21 @@ const Toolbar = ({
         clearLongPress();
     }, [clearLongPress]);
 
-    const handlePressStart = useCallback((type, event) => {
+    const releasePointerCapture = useCallback((event) => {
+        if (activePointerIdRef.current == null) return;
+        const target = event.currentTarget;
+        if (target?.hasPointerCapture?.(activePointerIdRef.current)) {
+            target.releasePointerCapture(activePointerIdRef.current);
+        }
+        activePointerIdRef.current = null;
+    }, []);
+
+    const handlePointerDown = useCallback((type, event) => {
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
         clearLongPress();
         longPressTriggeredRef.current = false;
+        activePointerIdRef.current = event.pointerId;
+        event.currentTarget?.setPointerCapture?.(event.pointerId);
         const target = event.currentTarget;
         longPressTimerRef.current = setTimeout(() => {
             longPressTriggeredRef.current = true;
@@ -540,20 +553,21 @@ const Toolbar = ({
         }, 420);
     }, [clearLongPress]);
 
-    const handlePressEnd = useCallback((forwardAction) => {
+    const handlePointerUp = useCallback((forwardAction, event) => {
         const triggered = longPressTriggeredRef.current;
         clearLongPress();
+        releasePointerCapture(event);
         if (!triggered) {
             forwardAction();
         }
         longPressTriggeredRef.current = false;
-    }, [clearLongPress]);
+    }, [clearLongPress, releasePointerCapture]);
 
-    const handlePressCancel = useCallback(() => {
-        if (!longPressTriggeredRef.current) {
-            clearLongPress();
-        }
-    }, [clearLongPress]);
+    const handlePointerCancel = useCallback((event) => {
+        clearLongPress();
+        releasePointerCapture(event);
+        longPressTriggeredRef.current = false;
+    }, [clearLongPress, releasePointerCapture]);
 
     useEffect(() => {
         if (!menuInfo) return undefined;
@@ -623,23 +637,17 @@ const Toolbar = ({
             <button onClick={handleSnapGridToggle} className={`toolbar-btn ${snapGrid ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}>Snap Grid</button>
             <div className="toolbar-divider" />
             <button
-                onMouseDown={(e) => handlePressStart('mission', e)}
-                onMouseUp={() => handlePressEnd(startMission)}
-                onMouseLeave={handlePressCancel}
-                onTouchStart={(e) => handlePressStart('mission', e)}
-                onTouchEnd={() => handlePressEnd(startMission)}
-                onTouchCancel={handlePressCancel}
+                onPointerDown={(e) => handlePointerDown('mission', e)}
+                onPointerUp={(e) => handlePointerUp(startMission, e)}
+                onPointerCancel={handlePointerCancel}
                 className="toolbar-btn toolbar-btn--sky"
             >
                 Misión
             </button>
             <button
-                onMouseDown={(e) => handlePressStart('section', e)}
-                onMouseUp={() => handlePressEnd(startSection)}
-                onMouseLeave={handlePressCancel}
-                onTouchStart={(e) => handlePressStart('section', e)}
-                onTouchEnd={() => handlePressEnd(startSection)}
-                onTouchCancel={handlePressCancel}
+                onPointerDown={(e) => handlePointerDown('section', e)}
+                onPointerUp={(e) => handlePointerUp(startSection, e)}
+                onPointerCancel={handlePointerCancel}
                 className="toolbar-btn toolbar-btn--indigo"
             >
                 Sección
