@@ -96,6 +96,85 @@ body {
   backdrop-filter: blur(14px);
 }
 
+.toolbar-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  cursor: default;
+}
+
+.toolbar-longpress-menu {
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 9.5rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.92);
+  box-shadow: 0 22px 48px rgba(15, 23, 42, 0.28);
+  transform: translateY(-50%);
+}
+
+.toolbar-longpress-menu::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -7px;
+  width: 12px;
+  height: 12px;
+  background: inherit;
+  transform: translateY(-50%) rotate(45deg);
+  border-radius: 3px;
+}
+
+.toolbar-longpress-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.toolbar-menu-btn {
+  border: none;
+  border-radius: 0.6rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #ffffff;
+  cursor: pointer;
+  transition: transform 0.16s ease, background 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  justify-content: center;
+}
+
+.toolbar-menu-btn:hover {
+  transform: translateY(-1px);
+}
+
+.toolbar-menu-btn:active {
+  transform: translateY(0);
+}
+
+.toolbar-menu-btn--forward {
+  background: linear-gradient(135deg, #38bdf8, #2563eb);
+}
+
+.toolbar-menu-btn--forward:hover {
+  background: linear-gradient(135deg, #0ea5e9, #1d4ed8);
+}
+
+.toolbar-menu-btn--reverse {
+  background: linear-gradient(135deg, #f97316, #ef4444);
+}
+
+.toolbar-menu-btn--reverse:hover {
+  background: linear-gradient(135deg, #ea580c, #dc2626);
+}
+
 .toolbar-divider {
   height: 2rem;
   width: 1px;

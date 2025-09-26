@@ -489,7 +489,83 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
     );
 };
 
-const Toolbar = ({ drawMode, setDrawMode, snapAngles, setSnapAngles, snapGrid, setSnapGrid, isRunning, isPaused, startMission, startSection, pauseResume, stopPlayback, setShowOptions, rulerActive, handleRulerToggle }) => {
+const Toolbar = ({
+    drawMode,
+    setDrawMode,
+    snapAngles,
+    setSnapAngles,
+    snapGrid,
+    setSnapGrid,
+    isRunning,
+    isPaused,
+    startMission,
+    startMissionReverse,
+    startSection,
+    startSectionReverse,
+    pauseResume,
+    stopPlayback,
+    setShowOptions,
+    rulerActive,
+    handleRulerToggle,
+}) => {
+    const [menuInfo, setMenuInfo] = useState(null);
+    const longPressTimerRef = useRef(null);
+    const longPressTriggeredRef = useRef(false);
+
+    const clearLongPress = useCallback(() => {
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+    }, []);
+
+    const closeMenu = useCallback(() => {
+        setMenuInfo(null);
+        longPressTriggeredRef.current = false;
+        clearLongPress();
+    }, [clearLongPress]);
+
+    const handlePressStart = useCallback((type, event) => {
+        clearLongPress();
+        longPressTriggeredRef.current = false;
+        const target = event.currentTarget;
+        longPressTimerRef.current = setTimeout(() => {
+            longPressTriggeredRef.current = true;
+            const rect = target.getBoundingClientRect();
+            setMenuInfo({
+                type,
+                top: rect.top + rect.height / 2,
+                left: rect.right + 12,
+            });
+        }, 420);
+    }, [clearLongPress]);
+
+    const handlePressEnd = useCallback((forwardAction) => {
+        const triggered = longPressTriggeredRef.current;
+        clearLongPress();
+        if (!triggered) {
+            forwardAction();
+        }
+        longPressTriggeredRef.current = false;
+    }, [clearLongPress]);
+
+    const handlePressCancel = useCallback(() => {
+        if (!longPressTriggeredRef.current) {
+            clearLongPress();
+        }
+    }, [clearLongPress]);
+
+    useEffect(() => {
+        if (!menuInfo) return undefined;
+        const handleKey = (event) => {
+            if (event.key === 'Escape') {
+                closeMenu();
+            }
+        };
+        window.addEventListener('keydown', handleKey);
+        return () => window.removeEventListener('keydown', handleKey);
+    }, [menuInfo, closeMenu]);
+
     const handleSnapGridToggle = () => {
         const isTurningOn = !snapGrid;
         setSnapGrid(isTurningOn);
@@ -504,6 +580,39 @@ const Toolbar = ({ drawMode, setDrawMode, snapAngles, setSnapAngles, snapGrid, s
 
     return (
         <div className="toolbar-card sticky top-4 z-20">
+            {menuInfo && (
+                <>
+                    <div className="toolbar-menu-backdrop" onClick={closeMenu} role="presentation" />
+                    <div
+                        className={`toolbar-longpress-menu toolbar-longpress-menu--${menuInfo.type}`}
+                        style={{ top: menuInfo.top, left: menuInfo.left }}
+                    >
+                        <span className="toolbar-longpress-label">Modo de reproducción</span>
+                        <button
+                            type="button"
+                            className="toolbar-menu-btn toolbar-menu-btn--forward"
+                            onClick={() => {
+                                if (menuInfo.type === 'mission') startMission();
+                                else startSection();
+                                closeMenu();
+                            }}
+                        >
+                            ▶ Adelante
+                        </button>
+                        <button
+                            type="button"
+                            className="toolbar-menu-btn toolbar-menu-btn--reverse"
+                            onClick={() => {
+                                if (menuInfo.type === 'mission') startMissionReverse();
+                                else startSectionReverse();
+                                closeMenu();
+                            }}
+                        >
+                            ◀ Reversa
+                        </button>
+                    </div>
+                </>
+            )}
             <button onClick={() => setDrawMode(d => !d)} className={`toolbar-btn w-28 ${drawMode ? 'toolbar-btn--emerald' : 'toolbar-btn--muted'}`}>
                 {drawMode ? 'Dibujando' : 'Editando'}
             </button>
@@ -513,8 +622,28 @@ const Toolbar = ({ drawMode, setDrawMode, snapAngles, setSnapAngles, snapGrid, s
             <button onClick={handleSnapAnglesToggle} className={`toolbar-btn ${snapAngles ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}>Snap 15°</button>
             <button onClick={handleSnapGridToggle} className={`toolbar-btn ${snapGrid ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}>Snap Grid</button>
             <div className="toolbar-divider" />
-            <button onClick={startMission} className="toolbar-btn toolbar-btn--sky">Misión</button>
-            <button onClick={startSection} className="toolbar-btn toolbar-btn--indigo">Sección</button>
+            <button
+                onMouseDown={(e) => handlePressStart('mission', e)}
+                onMouseUp={() => handlePressEnd(startMission)}
+                onMouseLeave={handlePressCancel}
+                onTouchStart={(e) => handlePressStart('mission', e)}
+                onTouchEnd={() => handlePressEnd(startMission)}
+                onTouchCancel={handlePressCancel}
+                className="toolbar-btn toolbar-btn--sky"
+            >
+                Misión
+            </button>
+            <button
+                onMouseDown={(e) => handlePressStart('section', e)}
+                onMouseUp={() => handlePressEnd(startSection)}
+                onMouseLeave={handlePressCancel}
+                onTouchStart={(e) => handlePressStart('section', e)}
+                onTouchEnd={() => handlePressEnd(startSection)}
+                onTouchCancel={handlePressCancel}
+                className="toolbar-btn toolbar-btn--indigo"
+            >
+                Sección
+            </button>
             <button onClick={pauseResume} disabled={!isRunning} className={`toolbar-btn ${isPaused ? 'toolbar-btn--emerald' : 'toolbar-btn--amber'}`}>{isPaused ? 'Reanudar' : 'Pausar'}</button>
             <button onClick={stopPlayback} disabled={!isRunning} className="toolbar-btn toolbar-btn--rose">Detener</button>
             <div className="ml-auto flex items-center gap-2 text-sm">
@@ -554,7 +683,7 @@ export default function WROPlaybackPlanner() {
     const [unit, setUnit] = useState('cm');
 
     const animRef = useRef(0);
-    const actionCursorRef = useRef({ list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0 });
+    const actionCursorRef = useRef({ list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1 });
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
 
@@ -824,11 +953,119 @@ export default function WROPlaybackPlanner() {
         );
     };
 
-    const stopPlayback = useCallback(() => { cancelAnimationFrame(animRef.current); setIsRunning(false); setIsPaused(false); actionCursorRef.current = { list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0 }; setPlayPose({ ...initialPose }); }, [initialPose]);
-    const tick = useCallback(() => { if (isPaused) { animRef.current = requestAnimationFrame(tick); return; } const ac = actionCursorRef.current; if (ac.idx >= ac.list.length) { stopPlayback(); return; } const a = ac.list[ac.idx]; const rotStep = 5 * DEG2RAD; const speedPx = unitToPx(40) / 60; setPlayPose(prev => { let pose = { ...prev }; if (a.type === 'rotate') { if (ac.phase !== 'rotate') { ac.phase = 'rotate'; ac.remainingAngle = a.angle * DEG2RAD; } const step = Math.sign(ac.remainingAngle) * Math.min(Math.abs(ac.remainingAngle), rotStep); pose.theta += step; ac.remainingAngle -= step; if (Math.abs(ac.remainingAngle) < 1e-3) { ac.phase = 'idle'; ac.idx++; } } else { if (ac.phase !== 'move') { ac.phase = 'move'; ac.remainingPx = unitToPx(a.distance); } const step = Math.min(speedPx, ac.remainingPx); pose.x += Math.cos(pose.theta) * step; pose.y += Math.sin(pose.theta) * step; ac.remainingPx -= step; if (ac.remainingPx < 1e-3) { ac.phase = 'idle'; ac.idx++; } } return pose; }); animRef.current = requestAnimationFrame(tick); }, [isPaused, stopPlayback, unitToPx]);
-    const startPlayback = useCallback((list, startPose) => { if (!list.length) return; cancelAnimationFrame(animRef.current); setIsRunning(true); setIsPaused(false); actionCursorRef.current = { list: [...list], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0 }; setPlayPose({ ...startPose }); animRef.current = requestAnimationFrame(tick); }, [tick]);
-    const startMission = useCallback(() => { const list = sections.flatMap(s => s.actions); startPlayback(list, initialPose); }, [sections, initialPose, startPlayback]);
-    const startSection = useCallback(() => { if (!currentSection) return; const startPose = computePoseUpToSection(currentSection.id); startPlayback(currentSection.actions, startPose); }, [currentSection, computePoseUpToSection, startPlayback]);
+    const stopPlayback = useCallback(() => {
+        cancelAnimationFrame(animRef.current);
+        setIsRunning(false);
+        setIsPaused(false);
+        actionCursorRef.current = { list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1 };
+        setPlayPose({ ...initialPose });
+    }, [initialPose]);
+    const tick = useCallback(() => {
+        if (isPaused) { animRef.current = requestAnimationFrame(tick); return; }
+        const ac = actionCursorRef.current;
+        if (ac.idx >= ac.list.length) { stopPlayback(); return; }
+        const a = ac.list[ac.idx];
+        const rotStep = 5 * DEG2RAD;
+        const speedPx = unitToPx(40) / 60;
+        setPlayPose(prev => {
+            let pose = { ...prev };
+            if (a.type === 'rotate') {
+                if (ac.phase !== 'rotate') {
+                    ac.phase = 'rotate';
+                    ac.remainingAngle = a.angle * DEG2RAD;
+                }
+                const remaining = ac.remainingAngle;
+                if (Math.abs(remaining) < 1e-3) {
+                    ac.phase = 'idle';
+                    ac.idx++;
+                    return pose;
+                }
+                const step = Math.sign(remaining) * Math.min(Math.abs(remaining), rotStep);
+                pose.theta += step;
+                ac.remainingAngle -= step;
+                if (Math.abs(ac.remainingAngle) < 1e-3) {
+                    ac.phase = 'idle';
+                    ac.idx++;
+                }
+            } else {
+                if (ac.phase !== 'move') {
+                    ac.phase = 'move';
+                    ac.remainingPx = unitToPx(Math.abs(a.distance));
+                    ac.moveDirection = Math.sign(a.distance) || 1;
+                }
+                const remainingPx = ac.remainingPx ?? 0;
+                if (remainingPx < 1e-3) {
+                    ac.phase = 'idle';
+                    ac.idx++;
+                    return pose;
+                }
+                const step = Math.min(speedPx, remainingPx);
+                const direction = ac.moveDirection ?? 1;
+                pose.x += Math.cos(pose.theta) * step * direction;
+                pose.y += Math.sin(pose.theta) * step * direction;
+                ac.remainingPx = remainingPx - step;
+                if ((ac.remainingPx ?? 0) < 1e-3) {
+                    ac.phase = 'idle';
+                    ac.idx++;
+                }
+            }
+            return pose;
+        });
+        animRef.current = requestAnimationFrame(tick);
+    }, [isPaused, stopPlayback, unitToPx]);
+    const startPlayback = useCallback((list, startPose) => {
+        if (!list.length) return;
+        cancelAnimationFrame(animRef.current);
+        setIsRunning(true);
+        setIsPaused(false);
+        actionCursorRef.current = { list: [...list], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1 };
+        setPlayPose({ ...startPose });
+        animRef.current = requestAnimationFrame(tick);
+    }, [tick]);
+
+    const buildReverseActions = useCallback((actions) => actions.slice().reverse().map(act => act.type === 'rotate'
+        ? { type: 'rotate', angle: -act.angle }
+        : { type: 'move', distance: -act.distance }
+    ), []);
+
+    const poseAfterActions = useCallback((actions, startPose) => {
+        let pose = { ...startPose };
+        for (const act of actions) {
+            if (act.type === 'rotate') {
+                pose.theta += act.angle * DEG2RAD;
+            } else {
+                const distancePx = unitToPx(act.distance);
+                pose.x += Math.cos(pose.theta) * distancePx;
+                pose.y += Math.sin(pose.theta) * distancePx;
+            }
+        }
+        return pose;
+    }, [unitToPx]);
+
+    const startMission = useCallback(() => {
+        const list = sections.flatMap(s => s.actions);
+        startPlayback(list, initialPose);
+    }, [sections, initialPose, startPlayback]);
+
+    const startMissionReverse = useCallback(() => {
+        const list = sections.flatMap(s => s.actions);
+        if (!list.length) return;
+        const endPose = poseAfterActions(list, initialPose);
+        startPlayback(buildReverseActions(list), endPose);
+    }, [sections, initialPose, poseAfterActions, buildReverseActions, startPlayback]);
+
+    const startSection = useCallback(() => {
+        if (!currentSection) return;
+        const startPose = computePoseUpToSection(currentSection.id);
+        startPlayback(currentSection.actions, startPose);
+    }, [currentSection, computePoseUpToSection, startPlayback]);
+
+    const startSectionReverse = useCallback(() => {
+        if (!currentSection) return;
+        const sectionStartPose = computePoseUpToSection(currentSection.id);
+        const endPose = poseAfterActions(currentSection.actions, sectionStartPose);
+        startPlayback(buildReverseActions(currentSection.actions), endPose);
+    }, [currentSection, computePoseUpToSection, poseAfterActions, buildReverseActions, startPlayback]);
     const pauseResume = () => { if (!isRunning) return; setIsPaused(p => !p); };
 
     const handleRulerToggle = () => {
@@ -851,7 +1088,27 @@ export default function WROPlaybackPlanner() {
     return (
         <div className="w-full h-full min-h-screen">
             <main className="app-shell">
-                <Toolbar {...{ drawMode, setDrawMode, snapAngles, setSnapAngles, snapGrid, setSnapGrid, isRunning, isPaused, startMission, startSection, pauseResume, stopPlayback, setShowOptions, rulerActive, handleRulerToggle }} />
+                <Toolbar
+                    {...{
+                        drawMode,
+                        setDrawMode,
+                        snapAngles,
+                        setSnapAngles,
+                        snapGrid,
+                        setSnapGrid,
+                        isRunning,
+                        isPaused,
+                        startMission,
+                        startMissionReverse,
+                        startSection,
+                        startSectionReverse,
+                        pauseResume,
+                        stopPlayback,
+                        setShowOptions,
+                        rulerActive,
+                        handleRulerToggle,
+                    }}
+                />
 
                 <div className="main-grid">
                     {/* PANEL IZQUIERDO (card) */}
