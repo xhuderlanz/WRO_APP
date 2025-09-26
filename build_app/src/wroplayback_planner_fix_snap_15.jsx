@@ -972,24 +972,10 @@ export default function WROPlaybackPlanner() {
         animRef.current = requestAnimationFrame(tick);
     }, [tick]);
 
-    const buildReverseActions = useCallback((actions) => actions.slice().reverse().map(act => act.type === 'rotate'
-        ? { type: 'rotate', angle: -act.angle }
-        : { type: 'move', distance: -act.distance }
+    const buildReverseActions = useCallback((actions) => actions.map(act => act.type === 'move'
+        ? { ...act, distance: -act.distance }
+        : act
     ), []);
-
-    const poseAfterActions = useCallback((actions, startPose) => {
-        let pose = { ...startPose };
-        for (const act of actions) {
-            if (act.type === 'rotate') {
-                pose.theta += act.angle * DEG2RAD;
-            } else {
-                const distancePx = unitToPx(act.distance);
-                pose.x += Math.cos(pose.theta) * distancePx;
-                pose.y += Math.sin(pose.theta) * distancePx;
-            }
-        }
-        return pose;
-    }, [unitToPx]);
 
     const startMission = useCallback(() => {
         const list = sections.flatMap(s => s.actions);
@@ -998,10 +984,8 @@ export default function WROPlaybackPlanner() {
 
     const startMissionReverse = useCallback(() => {
         const list = sections.flatMap(s => s.actions);
-        if (!list.length) return;
-        const endPose = poseAfterActions(list, initialPose);
-        startPlayback(buildReverseActions(list), endPose);
-    }, [sections, initialPose, poseAfterActions, buildReverseActions, startPlayback]);
+        startPlayback(buildReverseActions(list), initialPose);
+    }, [sections, initialPose, buildReverseActions, startPlayback]);
 
     const startSection = useCallback(() => {
         if (!currentSection) return;
@@ -1012,9 +996,8 @@ export default function WROPlaybackPlanner() {
     const startSectionReverse = useCallback(() => {
         if (!currentSection) return;
         const sectionStartPose = computePoseUpToSection(currentSection.id);
-        const endPose = poseAfterActions(currentSection.actions, sectionStartPose);
-        startPlayback(buildReverseActions(currentSection.actions), endPose);
-    }, [currentSection, computePoseUpToSection, poseAfterActions, buildReverseActions, startPlayback]);
+        startPlayback(buildReverseActions(currentSection.actions), sectionStartPose);
+    }, [currentSection, computePoseUpToSection, buildReverseActions, startPlayback]);
     const pauseResume = () => { if (!isRunning) return; setIsPaused(p => !p); };
 
     const handleRulerToggle = () => {
