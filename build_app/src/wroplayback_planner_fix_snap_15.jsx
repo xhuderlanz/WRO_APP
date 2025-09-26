@@ -507,78 +507,24 @@ const Toolbar = ({
     setShowOptions,
     rulerActive,
     handleRulerToggle,
+    reversePlayback,
+    onToggleReverse,
 }) => {
-    const [menuInfo, setMenuInfo] = useState(null);
-    const longPressTimerRef = useRef(null);
-    const longPressTriggeredRef = useRef(false);
-    const activePointerIdRef = useRef(null);
-
-    const clearLongPress = useCallback(() => {
-        if (longPressTimerRef.current) {
-            clearTimeout(longPressTimerRef.current);
-            longPressTimerRef.current = null;
+    const handleMissionClick = useCallback(() => {
+        if (reversePlayback) {
+            startMissionReverse();
+        } else {
+            startMission();
         }
-    }, []);
+    }, [reversePlayback, startMission, startMissionReverse]);
 
-    const closeMenu = useCallback(() => {
-        setMenuInfo(null);
-        longPressTriggeredRef.current = false;
-        clearLongPress();
-    }, [clearLongPress]);
-
-    const releasePointerCapture = useCallback((event) => {
-        if (activePointerIdRef.current == null) return;
-        const target = event.currentTarget;
-        if (target?.hasPointerCapture?.(activePointerIdRef.current)) {
-            target.releasePointerCapture(activePointerIdRef.current);
+    const handleSectionClick = useCallback(() => {
+        if (reversePlayback) {
+            startSectionReverse();
+        } else {
+            startSection();
         }
-        activePointerIdRef.current = null;
-    }, []);
-
-    const handlePointerDown = useCallback((type, event) => {
-        if (event.pointerType === 'mouse' && event.button !== 0) return;
-        clearLongPress();
-        longPressTriggeredRef.current = false;
-        activePointerIdRef.current = event.pointerId;
-        event.currentTarget?.setPointerCapture?.(event.pointerId);
-        const target = event.currentTarget;
-        longPressTimerRef.current = setTimeout(() => {
-            longPressTriggeredRef.current = true;
-            const rect = target.getBoundingClientRect();
-            setMenuInfo({
-                type,
-                top: rect.top + rect.height / 2,
-                left: rect.right + 12,
-            });
-        }, 420);
-    }, [clearLongPress]);
-
-    const handlePointerUp = useCallback((forwardAction, event) => {
-        const triggered = longPressTriggeredRef.current;
-        clearLongPress();
-        releasePointerCapture(event);
-        if (!triggered) {
-            forwardAction();
-        }
-        longPressTriggeredRef.current = false;
-    }, [clearLongPress, releasePointerCapture]);
-
-    const handlePointerCancel = useCallback((event) => {
-        clearLongPress();
-        releasePointerCapture(event);
-        longPressTriggeredRef.current = false;
-    }, [clearLongPress, releasePointerCapture]);
-
-    useEffect(() => {
-        if (!menuInfo) return undefined;
-        const handleKey = (event) => {
-            if (event.key === 'Escape') {
-                closeMenu();
-            }
-        };
-        window.addEventListener('keydown', handleKey);
-        return () => window.removeEventListener('keydown', handleKey);
-    }, [menuInfo, closeMenu]);
+    }, [reversePlayback, startSection, startSectionReverse]);
 
     const handleSnapGridToggle = () => {
         const isTurningOn = !snapGrid;
@@ -594,39 +540,16 @@ const Toolbar = ({
 
     return (
         <div className="toolbar-card sticky top-4 z-20">
-            {menuInfo && (
-                <>
-                    <div className="toolbar-menu-backdrop" onClick={closeMenu} role="presentation" />
-                    <div
-                        className={`toolbar-longpress-menu toolbar-longpress-menu--${menuInfo.type}`}
-                        style={{ top: menuInfo.top, left: menuInfo.left }}
-                    >
-                        <span className="toolbar-longpress-label">Modo de reproducción</span>
-                        <button
-                            type="button"
-                            className="toolbar-menu-btn toolbar-menu-btn--forward"
-                            onClick={() => {
-                                if (menuInfo.type === 'mission') startMission();
-                                else startSection();
-                                closeMenu();
-                            }}
-                        >
-                            ▶ Adelante
-                        </button>
-                        <button
-                            type="button"
-                            className="toolbar-menu-btn toolbar-menu-btn--reverse"
-                            onClick={() => {
-                                if (menuInfo.type === 'mission') startMissionReverse();
-                                else startSectionReverse();
-                                closeMenu();
-                            }}
-                        >
-                            ◀ Reversa
-                        </button>
-                    </div>
-                </>
-            )}
+            <button
+                type="button"
+                className={`toolbar-btn toolbar-reverse-btn ${reversePlayback ? 'toolbar-reverse-btn--active' : ''}`}
+                onClick={onToggleReverse}
+                aria-pressed={reversePlayback}
+            >
+                <span className="toolbar-reverse-label">Modo reversa</span>
+                <span className="toolbar-reverse-state">{reversePlayback ? 'Activado' : 'Desactivado'}</span>
+                <span className="toolbar-reverse-chip">Espacio</span>
+            </button>
             <button onClick={() => setDrawMode(d => !d)} className={`toolbar-btn w-28 ${drawMode ? 'toolbar-btn--emerald' : 'toolbar-btn--muted'}`}>
                 {drawMode ? 'Dibujando' : 'Editando'}
             </button>
@@ -637,20 +560,16 @@ const Toolbar = ({
             <button onClick={handleSnapGridToggle} className={`toolbar-btn ${snapGrid ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}>Snap Grid</button>
             <div className="toolbar-divider" />
             <button
-                onPointerDown={(e) => handlePointerDown('mission', e)}
-                onPointerUp={(e) => handlePointerUp(startMission, e)}
-                onPointerCancel={handlePointerCancel}
+                onClick={handleMissionClick}
                 className="toolbar-btn toolbar-btn--sky"
             >
-                Misión
+                {reversePlayback ? 'Misión ◀' : 'Misión ▶'}
             </button>
             <button
-                onPointerDown={(e) => handlePointerDown('section', e)}
-                onPointerUp={(e) => handlePointerUp(startSection, e)}
-                onPointerCancel={handlePointerCancel}
+                onClick={handleSectionClick}
                 className="toolbar-btn toolbar-btn--indigo"
             >
-                Sección
+                {reversePlayback ? 'Sección ◀' : 'Sección ▶'}
             </button>
             <button onClick={pauseResume} disabled={!isRunning} className={`toolbar-btn ${isPaused ? 'toolbar-btn--emerald' : 'toolbar-btn--amber'}`}>{isPaused ? 'Reanudar' : 'Pausar'}</button>
             <button onClick={stopPlayback} disabled={!isRunning} className="toolbar-btn toolbar-btn--rose">Detener</button>
@@ -689,6 +608,7 @@ export default function WROPlaybackPlanner() {
     const [isDraggingRuler, setIsDraggingRuler] = useState(false);
     const [isSettingOrigin, setIsSettingOrigin] = useState(false);
     const [unit, setUnit] = useState('cm');
+    const [reversePlayback, setReversePlayback] = useState(false);
 
     const animRef = useRef(0);
     const actionCursorRef = useRef({ list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1 });
@@ -699,6 +619,27 @@ export default function WROPlaybackPlanner() {
 
     const unitToPx = useCallback((d) => d * grid.pixelsPerUnit, [grid.pixelsPerUnit]);
     const pxToUnit = useCallback((px) => px / grid.pixelsPerUnit, [grid.pixelsPerUnit]);
+
+    const toggleReversePlayback = useCallback(() => {
+        setReversePlayback(prev => !prev);
+    }, []);
+
+    useEffect(() => {
+        const handleKeyDown = (event) => {
+            if (event.repeat) return;
+            if (event.code === 'Space' || event.key === ' ') {
+                const target = event.target;
+                const tagName = target?.tagName?.toLowerCase?.() ?? '';
+                const isEditable = target?.isContentEditable;
+                if (isEditable) return;
+                if (['input', 'textarea', 'select', 'button'].includes(tagName)) return;
+                event.preventDefault();
+                toggleReversePlayback();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [toggleReversePlayback]);
 
     const computePoseUpToSection = useCallback((sectionId) => {
         let pose = { ...initialPose };
@@ -1115,6 +1056,8 @@ export default function WROPlaybackPlanner() {
                         setShowOptions,
                         rulerActive,
                         handleRulerToggle,
+                        reversePlayback,
+                        onToggleReverse: toggleReversePlayback,
                     }}
                 />
 

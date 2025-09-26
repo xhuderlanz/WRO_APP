@@ -96,6 +96,56 @@ body {
   backdrop-filter: blur(14px);
 }
 
+.toolbar-reverse-btn {
+  flex: 1 1 100%;
+  justify-content: space-between;
+  padding: 0.65rem 1rem;
+  background: linear-gradient(135deg, #e2e8f0, #cbd5f5);
+  color: #1f2937;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.toolbar-reverse-btn:hover {
+  background: linear-gradient(135deg, #cbd5f5, #94a3b8);
+  color: #0f172a;
+}
+
+.toolbar-reverse-btn--active {
+  background: linear-gradient(135deg, #fb923c, #ef4444);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 16px 32px rgba(239, 68, 68, 0.35);
+}
+
+.toolbar-reverse-btn--active:hover {
+  background: linear-gradient(135deg, #f97316, #dc2626);
+}
+
+.toolbar-reverse-label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.toolbar-reverse-state {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.toolbar-reverse-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.12);
+  color: #1f2937;
+}
+
+.toolbar-reverse-btn--active .toolbar-reverse-chip {
+  background: rgba(255, 255, 255, 0.24);
+  color: #ffffff;
+}
+
 .toolbar-menu-backdrop {
   position: fixed;
   inset: 0;
