@@ -759,7 +759,16 @@ export default function WROPlaybackPlanner() {
     const [drawMode, setDrawMode] = useState(true);
     const [snapGrid, setSnapGrid] = useState(true);
     const [snapAngles, setSnapAngles] = useState(false);
-    const [ghost, setGhost] = useState({ x: 0, y: 0, theta: 0, reference: 'center', displayX: 0, displayY: 0 });
+    const [ghost, setGhost] = useState({
+        x: 0,
+        y: 0,
+        theta: 0,
+        reference: 'center',
+        displayX: 0,
+        displayY: 0,
+        originX: 0,
+        originY: 0,
+    });
     const [dragging, setDragging] = useState({ active: false, sectionId: null, index: -1 });
     const [hoverNode, setHoverNode] = useState({ sectionId: null, index: -1 });
     const [draggingStart, setDraggingStart] = useState(false);
@@ -794,6 +803,19 @@ export default function WROPlaybackPlanner() {
         while (a > Math.PI) a -= 2 * Math.PI;
         return a;
     }, []);
+
+    const halfRobotLengthPx = useMemo(() => unitToPx(robot.length) / 2, [unitToPx, robot.length]);
+
+    const getReferencePoint = useCallback((pose, reference) => {
+        if (!pose) return { x: 0, y: 0 };
+        if (reference === 'tip') {
+            return {
+                x: pose.x + Math.cos(pose.theta) * halfRobotLengthPx,
+                y: pose.y + Math.sin(pose.theta) * halfRobotLengthPx,
+            };
+        }
+        return { x: pose.x, y: pose.y };
+    }, [halfRobotLengthPx]);
 
     const toggleReverseDrawing = useCallback(() => {
         setReverseDrawing(prev => !prev);
@@ -848,6 +870,23 @@ export default function WROPlaybackPlanner() {
         }
     }, [drawMode]);
 
+    useEffect(() => {
+        const base = 420;
+        const min = 320;
+        const zoomRange = Math.max(ZOOM_LIMITS.max - 1, 1);
+        const ratio = zoom <= 1 ? 0 : Math.min((zoom - 1) / zoomRange, 1);
+        const computed = base - (base - min) * ratio;
+        const rootStyle = document.documentElement?.style;
+        if (rootStyle) {
+            rootStyle.setProperty('--panel-w', `${computed}px`);
+        }
+        return () => {
+            if (rootStyle && !document.documentElement.contains(document.getElementById('root'))) {
+                rootStyle.setProperty('--panel-w', `${base}px`);
+            }
+        };
+    }, [zoom]);
+
     const computePoseUpToSection = useCallback((sectionId) => {
         let pose = { ...initialPose };
         for (const s of sections) {
@@ -876,6 +915,25 @@ export default function WROPlaybackPlanner() {
         }
         return pose;
     }, [unitToPx, normalizeAngle]);
+
+    const getLastPoseOfSection = useCallback((section) => {
+        if (!section) return { ...initialPose };
+        let pose = computePoseUpToSection(section.id);
+        for (const pt of section.points || []) {
+            const dx = pt.x - pose.x;
+            const dy = pt.y - pose.y;
+            const dist = Math.hypot(dx, dy);
+            let nextTheta = typeof pt.heading === 'number' ? pt.heading : pose.theta;
+            if (dist >= 1e-3) {
+                const headingToPoint = Math.atan2(dy, dx);
+                nextTheta = typeof pt.heading === 'number'
+                    ? pt.heading
+                    : normalizeAngle((pt.reverse ? headingToPoint + Math.PI : headingToPoint));
+            }
+            pose = { x: pt.x, y: pt.y, theta: nextTheta };
+        }
+        return pose;
+    }, [computePoseUpToSection, normalizeAngle, initialPose]);
 
     const buildReversePlayback = useCallback((actions) => {
         const reversed = [];
@@ -937,10 +995,22 @@ export default function WROPlaybackPlanner() {
             if (a.type === 'rotate') {
                 pose.theta = normalizeAngle(pose.theta + a.angle * DEG2RAD);
             } else {
-                const dx = Math.cos(pose.theta) * unitToPx(a.distance);
-                const dy = Math.sin(pose.theta) * unitToPx(a.distance);
-                pose = { x: pose.x + dx, y: pose.y + dy, theta: pose.theta };
-                pts.push({ x: pose.x, y: pose.y, reverse: a.distance < 0, reference: a.reference || 'center' });
+                const direction = Math.sign(a.distance) || 1;
+                const travelPx = unitToPx(Math.abs(a.distance));
+                const dx = Math.cos(pose.theta) * travelPx * direction;
+                const dy = Math.sin(pose.theta) * travelPx * direction;
+                pose = {
+                    x: pose.x + dx,
+                    y: pose.y + dy,
+                    theta: pose.theta,
+                };
+                pts.push({
+                    x: pose.x,
+                    y: pose.y,
+                    reverse: a.distance < 0,
+                    reference: a.reference || 'center',
+                    heading: pose.theta,
+                });
             }
         }
         return pts;
@@ -1060,19 +1130,32 @@ export default function WROPlaybackPlanner() {
         
         sections.forEach(s => {
             if (s.isVisible === false || !s.points.length) return;
-            let prev = computePoseUpToSection(s.id);
+            let pose = computePoseUpToSection(s.id);
             s.points.forEach((pt) => {
                 const reference = pt.reference || 'center';
+                const startDisplay = getReferencePoint(pose, reference);
+                const dx = pt.x - pose.x;
+                const dy = pt.y - pose.y;
+                const dist = Math.hypot(dx, dy);
+                let segmentTheta = typeof pt.heading === 'number' ? pt.heading : pose.theta;
+                if (dist >= 1e-3) {
+                    const headingToPoint = Math.atan2(dy, dx);
+                    segmentTheta = typeof pt.heading === 'number'
+                        ? pt.heading
+                        : normalizeAngle(pt.reverse ? headingToPoint + Math.PI : headingToPoint);
+                }
+                const endPose = { x: pt.x, y: pt.y, theta: segmentTheta };
+                const endDisplay = getReferencePoint(endPose, reference);
                 ctx.save();
                 ctx.lineWidth = reference === 'tip' ? 3.5 : 3;
                 ctx.strokeStyle = s.color || '#000';
                 ctx.setLineDash(reference === 'tip' ? [12, 8] : []);
                 ctx.beginPath();
-                ctx.moveTo(prev.x, prev.y);
-                ctx.lineTo(pt.x, pt.y);
+                ctx.moveTo(startDisplay.x, startDisplay.y);
+                ctx.lineTo(endDisplay.x, endDisplay.y);
                 ctx.stroke();
                 ctx.restore();
-                prev = pt;
+                pose = endPose;
             });
             if (!drawMode) {
                 s.points.forEach((pt, i) => {
@@ -1101,16 +1184,21 @@ export default function WROPlaybackPlanner() {
             }
             drawRobot(ctx, finalPose, false);
             if (drawMode) {
-                const lastPoint = currentSection.points.length > 0 ? currentSection.points[currentSection.points.length - 1] : computePoseUpToSection(currentSection.id);
-                const previewX = Number.isFinite(ghost.displayX) ? ghost.displayX : ghost.x;
-                const previewY = Number.isFinite(ghost.displayY) ? ghost.displayY : ghost.y;
+                const anchorPose = currentSection.points.length > 0
+                    ? getLastPoseOfSection(currentSection)
+                    : computePoseUpToSection(currentSection.id);
+                const fallbackOrigin = getReferencePoint(anchorPose, ghost.reference || referenceMode);
+                const originX = Number.isFinite(ghost.originX) ? ghost.originX : fallbackOrigin.x;
+                const originY = Number.isFinite(ghost.originY) ? ghost.originY : fallbackOrigin.y;
+                const previewPose = { x: ghost.x, y: ghost.y, theta: ghost.theta };
+                const previewPoint = getReferencePoint(previewPose, ghost.reference || referenceMode);
                 ctx.save();
                 ctx.setLineDash(ghost.reference === 'tip' ? [10, 6] : [8, 6]);
                 ctx.strokeStyle = ghost.reference === 'tip' ? '#fb923c' : (currentSection.color || '#64748b');
                 ctx.lineWidth = 2;
                 ctx.beginPath();
-                ctx.moveTo(lastPoint.x, lastPoint.y);
-                ctx.lineTo(previewX, previewY);
+                ctx.moveTo(originX, originY);
+                ctx.lineTo(previewPoint.x, previewPoint.y);
                 ctx.stroke();
                 ctx.restore();
             }
@@ -1137,7 +1225,7 @@ export default function WROPlaybackPlanner() {
 
         if (isRunning) { ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(5, 5, 120, 20); ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif'; const { idx, list } = actionCursorRef.current; ctx.fillText(`Acción ${idx + 1}/${list.length}`, 10, 18); ctx.restore(); drawRobot(ctx, playPose, false); }
         ctx.save(); ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(initialPose.x, initialPose.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-    }, [bgImage, bgOpacity, grid, sections, initialPose, drawMode, ghost, isRunning, playPose, dragging, hoverNode, unitToPx, computePoseUpToSection, drawRobot, currentSection, rulerActive, rulerPoints, pxToUnit, unit]);
+    }, [bgImage, bgOpacity, grid, sections, initialPose, drawMode, ghost, isRunning, playPose, dragging, hoverNode, unitToPx, computePoseUpToSection, drawRobot, currentSection, rulerActive, rulerPoints, pxToUnit, unit, getReferencePoint, getLastPoseOfSection, referenceMode, normalizeAngle]);
 
     useEffect(() => { const preset = FIELD_PRESETS.find(p => p.key === fieldKey); if (!preset || !preset.bg) { setBgImage(null); return; } const img = new Image(); img.onload = () => setBgImage(img); img.src = preset.bg; }, [fieldKey]);
     useEffect(() => { if (!robot.imageSrc) { setRobotImgObj(null); return; } const img = new Image(); img.onload = () => setRobotImgObj(img); img.src = robot.imageSrc; }, [robot.imageSrc]);
@@ -1197,12 +1285,12 @@ export default function WROPlaybackPlanner() {
             return;
         }
         if (drawMode && currentSection) {
-            const lastPoint = currentSection.points.length
-                ? currentSection.points[currentSection.points.length - 1]
+            const basePose = currentSection.points.length
+                ? getLastPoseOfSection(currentSection)
                 : computePoseUpToSection(currentSection.id);
             drawSessionRef.current = {
                 active: true,
-                lastPoint,
+                lastPoint: { x: basePose.x, y: basePose.y, heading: basePose.theta },
                 addedDuringDrag: false,
             };
             return;
@@ -1224,22 +1312,36 @@ export default function WROPlaybackPlanner() {
         if (dragging.active) { setSections(prev => { const newSections = prev.map(s => { if (s.id !== dragging.sectionId) return s; const pts = s.points.map((pt, i) => i === dragging.index ? { ...pt, x: p.x, y: p.y } : pt); return recalcSectionFromPoints({ ...s, points: pts }); }); return recalcAllFollowingSections(newSections, dragging.sectionId); }); return; }
         if (!drawMode && currentSection) { const idx = hitTestNode(currentSection.points, p, 8); setHoverNode(idx > -1 ? { sectionId: currentSection.id, index: idx } : { sectionId: null, index: -1 }); return; }
         if (drawMode && currentSection) {
-            const activeSession = drawSessionRef.current.active;
-            const anchor = activeSession && drawSessionRef.current.lastPoint
-                ? drawSessionRef.current.lastPoint
-                : (currentSection.points.length ? currentSection.points[currentSection.points.length - 1] : computePoseUpToSection(currentSection.id));
-            const { p: pSnapped, theta } = snapPointByAngle(p, anchor, reverseDrawing);
             const segmentReference = referenceMode;
+            const basePose = currentSection.points.length
+                ? getLastPoseOfSection(currentSection)
+                : computePoseUpToSection(currentSection.id);
+            const activeSession = drawSessionRef.current.active;
+            let anchorPose = basePose;
+            if (activeSession && drawSessionRef.current.lastPoint) {
+                const last = drawSessionRef.current.lastPoint;
+                anchorPose = {
+                    x: last.x,
+                    y: last.y,
+                    theta: typeof last.heading === 'number' ? last.heading : basePose.theta,
+                };
+            }
+            const { p: pSnapped, theta } = snapPointByAngle(p, anchorPose, reverseDrawing);
+            const previewPose = { x: pSnapped.x, y: pSnapped.y, theta };
+            const anchorDisplay = getReferencePoint(anchorPose, segmentReference);
+            const previewDisplay = getReferencePoint(previewPose, segmentReference);
             setGhost({
                 x: pSnapped.x,
                 y: pSnapped.y,
                 theta,
                 reference: segmentReference,
-                displayX: pSnapped.x,
-                displayY: pSnapped.y,
+                displayX: previewDisplay.x,
+                displayY: previewDisplay.y,
+                originX: anchorDisplay.x,
+                originY: anchorDisplay.y,
             });
             if (activeSession) {
-                const dist = Math.hypot(pSnapped.x - anchor.x, pSnapped.y - anchor.y);
+                const dist = Math.hypot(pSnapped.x - anchorPose.x, pSnapped.y - anchorPose.y);
                 if (dist >= DRAW_STEP_MIN_PX) {
                     setSections(prev => {
                         const updated = prev.map(s => {
@@ -1251,7 +1353,7 @@ export default function WROPlaybackPlanner() {
                     });
                     drawSessionRef.current = {
                         active: true,
-                        lastPoint: { ...pSnapped, reverse: reverseDrawing, reference: segmentReference, heading: theta },
+                        lastPoint: { x: pSnapped.x, y: pSnapped.y, heading: theta },
                         addedDuringDrag: true,
                     };
                 }
@@ -1285,8 +1387,10 @@ export default function WROPlaybackPlanner() {
             return;
         }
         const raw = canvasPos(e);
-        const last = currentSection.points.length ? currentSection.points[currentSection.points.length - 1] : computePoseUpToSection(currentSection.id);
-        const { p, theta } = snapPointByAngle(raw, last, reverseDrawing); // <-- guardar el PUNTO ya ajustado por 15°
+        const basePose = currentSection.points.length
+            ? getLastPoseOfSection(currentSection)
+            : computePoseUpToSection(currentSection.id);
+        const { p, theta } = snapPointByAngle(raw, basePose, reverseDrawing); // <-- guardar el PUNTO ya ajustado por 15°
         const segmentReference = referenceMode;
         setSections(prev => {
             const updated = prev.map(s => {
