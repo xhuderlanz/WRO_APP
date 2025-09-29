@@ -499,32 +499,22 @@ const Toolbar = ({
     isRunning,
     isPaused,
     startMission,
-    startMissionReverse,
     startSection,
-    startSectionReverse,
     pauseResume,
     stopPlayback,
     setShowOptions,
     rulerActive,
     handleRulerToggle,
-    reversePlayback,
+    reverseDrawing,
     onToggleReverse,
 }) => {
     const handleMissionClick = useCallback(() => {
-        if (reversePlayback) {
-            startMissionReverse();
-        } else {
-            startMission();
-        }
-    }, [reversePlayback, startMission, startMissionReverse]);
+        startMission();
+    }, [startMission]);
 
     const handleSectionClick = useCallback(() => {
-        if (reversePlayback) {
-            startSectionReverse();
-        } else {
-            startSection();
-        }
-    }, [reversePlayback, startSection, startSectionReverse]);
+        startSection();
+    }, [startSection]);
 
     const handleSnapGridToggle = () => {
         const isTurningOn = !snapGrid;
@@ -542,12 +532,12 @@ const Toolbar = ({
         <div className="toolbar-card sticky top-4 z-20">
             <button
                 type="button"
-                className={`toolbar-btn toolbar-reverse-btn ${reversePlayback ? 'toolbar-reverse-btn--active' : ''}`}
+                className={`toolbar-btn toolbar-reverse-btn ${reverseDrawing ? 'toolbar-reverse-btn--active' : ''}`}
                 onClick={onToggleReverse}
-                aria-pressed={reversePlayback}
+                aria-pressed={reverseDrawing}
             >
                 <span className="toolbar-reverse-label">Modo reversa</span>
-                <span className="toolbar-reverse-state">{reversePlayback ? 'Activado' : 'Desactivado'}</span>
+                <span className="toolbar-reverse-state">{reverseDrawing ? 'Dibujando hacia atrás' : 'Dibujando hacia adelante'}</span>
                 <span className="toolbar-reverse-chip">Espacio</span>
             </button>
             <button onClick={() => setDrawMode(d => !d)} className={`toolbar-btn w-28 ${drawMode ? 'toolbar-btn--emerald' : 'toolbar-btn--muted'}`}>
@@ -563,13 +553,13 @@ const Toolbar = ({
                 onClick={handleMissionClick}
                 className="toolbar-btn toolbar-btn--sky"
             >
-                {reversePlayback ? 'Misión ◀' : 'Misión ▶'}
+                Misión ▶
             </button>
             <button
                 onClick={handleSectionClick}
                 className="toolbar-btn toolbar-btn--indigo"
             >
-                {reversePlayback ? 'Sección ◀' : 'Sección ▶'}
+                Sección ▶
             </button>
             <button onClick={pauseResume} disabled={!isRunning} className={`toolbar-btn ${isPaused ? 'toolbar-btn--emerald' : 'toolbar-btn--amber'}`}>{isPaused ? 'Reanudar' : 'Pausar'}</button>
             <button onClick={stopPlayback} disabled={!isRunning} className="toolbar-btn toolbar-btn--rose">Detener</button>
@@ -608,7 +598,9 @@ export default function WROPlaybackPlanner() {
     const [isDraggingRuler, setIsDraggingRuler] = useState(false);
     const [isSettingOrigin, setIsSettingOrigin] = useState(false);
     const [unit, setUnit] = useState('cm');
-    const [reversePlayback, setReversePlayback] = useState(false);
+    const [reverseDrawing, setReverseDrawing] = useState(false);
+    const drawSessionRef = useRef({ active: false, lastPoint: null, addedDuringDrag: false });
+    const DRAW_STEP_MIN_PX = 6;
 
     const animRef = useRef(0);
     const actionCursorRef = useRef({ list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1 });
@@ -619,9 +611,15 @@ export default function WROPlaybackPlanner() {
 
     const unitToPx = useCallback((d) => d * grid.pixelsPerUnit, [grid.pixelsPerUnit]);
     const pxToUnit = useCallback((px) => px / grid.pixelsPerUnit, [grid.pixelsPerUnit]);
+    const normalizeAngle = useCallback((angle) => {
+        let a = angle;
+        while (a <= -Math.PI) a += 2 * Math.PI;
+        while (a > Math.PI) a -= 2 * Math.PI;
+        return a;
+    }, []);
 
-    const toggleReversePlayback = useCallback(() => {
-        setReversePlayback(prev => !prev);
+    const toggleReverseDrawing = useCallback(() => {
+        setReverseDrawing(prev => !prev);
     }, []);
 
     useEffect(() => {
@@ -634,12 +632,22 @@ export default function WROPlaybackPlanner() {
                 if (isEditable) return;
                 if (['input', 'textarea', 'select', 'button'].includes(tagName)) return;
                 event.preventDefault();
-                toggleReversePlayback();
+                toggleReverseDrawing();
             }
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [toggleReversePlayback]);
+    }, [toggleReverseDrawing]);
+
+    useEffect(() => {
+        drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false };
+    }, [selectedSectionId]);
+
+    useEffect(() => {
+        if (!drawMode) {
+            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false };
+        }
+    }, [drawMode]);
 
     const computePoseUpToSection = useCallback((sectionId) => {
         let pose = { ...initialPose };
@@ -654,26 +662,53 @@ export default function WROPlaybackPlanner() {
     }, [sections, initialPose, unitToPx]);
 
     const buildActionsFromPolyline = useCallback((points, startPose) => {
-        const acts = []; let prev = { ...startPose };
+        const acts = [];
+        let prev = { ...startPose };
         for (const pt of points) {
-            const dx = pt.x - prev.x, dy = pt.y - prev.y; const distPx = Math.hypot(dx, dy); let ang = Math.atan2(dy, dx) - prev.theta;
-            while (ang > Math.PI) ang -= 2 * Math.PI; while (ang < -Math.PI) ang += 2 * Math.PI;
-            if (snapAngles) ang = Math.round(ang / (15 * DEG2RAD)) * 15 * DEG2RAD;
-            const deg = ang * RAD2DEG; if (Math.abs(deg) > 1e-3) acts.push({ type: 'rotate', angle: Number(deg.toFixed(2)) });
-            const cm = pxToUnit(distPx); if (cm > 1e-3) acts.push({ type: 'move', distance: Number(cm.toFixed(2)) });
-            prev = { x: pt.x, y: pt.y, theta: prev.theta + ang };
+            const dx = pt.x - prev.x;
+            const dy = pt.y - prev.y;
+            const distPx = Math.hypot(dx, dy);
+            if (distPx < 1e-3) {
+                prev = { ...prev, x: pt.x, y: pt.y };
+                continue;
+            }
+            const segmentReverse = Boolean(pt.reverse);
+            const headingToPoint = Math.atan2(dy, dx);
+            let targetHeading = normalizeAngle(headingToPoint + (segmentReverse ? Math.PI : 0));
+            let ang = normalizeAngle(targetHeading - prev.theta);
+            if (snapAngles) {
+                ang = Math.round(ang / (15 * DEG2RAD)) * 15 * DEG2RAD;
+                targetHeading = normalizeAngle(prev.theta + ang);
+            }
+            const deg = ang * RAD2DEG;
+            if (Math.abs(deg) > 1e-3) {
+                acts.push({ type: 'rotate', angle: Number(deg.toFixed(2)) });
+            }
+            const cm = pxToUnit(distPx);
+            if (cm > 1e-3) {
+                const signed = segmentReverse ? -cm : cm;
+                acts.push({ type: 'move', distance: Number(signed.toFixed(2)) });
+            }
+            prev = { x: pt.x, y: pt.y, theta: targetHeading };
         }
         return acts;
-    }, [snapAngles, pxToUnit]);
+    }, [snapAngles, pxToUnit, normalizeAngle]);
 
     const pointsFromActions = useCallback((actions, startPose) => {
-        const pts = []; let pose = { ...startPose };
+        const pts = [];
+        let pose = { ...startPose };
         for (const a of actions) {
-            if (a.type === 'rotate') { pose.theta += a.angle * DEG2RAD; }
-            else { const dx = Math.cos(pose.theta) * unitToPx(a.distance); const dy = Math.sin(pose.theta) * unitToPx(a.distance); pose = { x: pose.x + dx, y: pose.y + dy, theta: pose.theta }; pts.push({ x: pose.x, y: pose.y }); }
+            if (a.type === 'rotate') {
+                pose.theta = normalizeAngle(pose.theta + a.angle * DEG2RAD);
+            } else {
+                const dx = Math.cos(pose.theta) * unitToPx(a.distance);
+                const dy = Math.sin(pose.theta) * unitToPx(a.distance);
+                pose = { x: pose.x + dx, y: pose.y + dy, theta: pose.theta };
+                pts.push({ x: pose.x, y: pose.y, reverse: a.distance < 0 });
+            }
         }
         return pts;
-    }, [unitToPx]);
+    }, [unitToPx, normalizeAngle]);
 
     const recalcAllFollowingSections = useCallback((allSections, changedSectionId) => {
         const changedIndex = allSections.findIndex(s => s.id === changedSectionId);
@@ -725,15 +760,17 @@ export default function WROPlaybackPlanner() {
         return Math.round(angleRad / step) * step;
     }, []);
 
-    const snapPointByAngle = useCallback((rawPoint, lastPoint) => {
+    const snapPointByAngle = useCallback((rawPoint, lastPoint, reverse = false) => {
         const dx = rawPoint.x - lastPoint.x;
         const dy = rawPoint.y - lastPoint.y;
         const r = Math.hypot(dx, dy);
         const thetaRaw = Math.atan2(dy, dx);
         const theta = snapAngles ? snapAngleTo(thetaRaw, 15) : thetaRaw;
         // Mantiene la misma distancia del mouse pero forzando la dirección a múltiplos de 15°
-        return { p: { x: lastPoint.x + r * Math.cos(theta), y: lastPoint.y + r * Math.sin(theta) }, theta };
-    }, [snapAngles, snapAngleTo]);
+        const snappedPoint = { x: lastPoint.x + r * Math.cos(theta), y: lastPoint.y + r * Math.sin(theta) };
+        const orientation = reverse ? normalizeAngle(theta + Math.PI) : theta;
+        return { p: snappedPoint, theta: orientation };
+    }, [snapAngles, snapAngleTo, normalizeAngle]);
 
     const drawRobot = useCallback((ctx, pose, isGhost = false) => {
         ctx.save(); ctx.translate(pose.x, pose.y); ctx.rotate(pose.theta);
@@ -840,12 +877,23 @@ export default function WROPlaybackPlanner() {
             setIsDraggingRuler(true);
             return;
         }
+        if (drawMode && currentSection) {
+            const lastPoint = currentSection.points.length
+                ? currentSection.points[currentSection.points.length - 1]
+                : computePoseUpToSection(currentSection.id);
+            drawSessionRef.current = {
+                active: true,
+                lastPoint,
+                addedDuringDrag: false,
+            };
+            return;
+        }
         if (drawMode) return;
         const p = canvasPos(e);
         if (Math.hypot(initialPose.x - p.x, initialPose.y - p.y) <= 10) { setDraggingStart(true); return; }
         if (currentSection) { const idx = hitTestNode(currentSection.points, p, 8); if (idx > -1) setDragging({ active: true, sectionId: currentSection.id, index: idx }); }
     };
-    
+
     const onCanvasMove = (e) => {
         if (rulerActive && isDraggingRuler) {
             const p = canvasPos(e, false);
@@ -854,12 +902,33 @@ export default function WROPlaybackPlanner() {
         }
         const p = canvasPos(e);
         if (draggingStart) { setInitialPose(prev => ({ ...prev, x: p.x, y: p.y })); setSections(prev => { const newSections = prev.map(sec => recalcSectionFromPoints(sec)); return recalcAllFollowingSections(newSections, prev[0].id); }); return; }
-        if (dragging.active) { setSections(prev => { const newSections = prev.map(s => { if (s.id !== dragging.sectionId) return s; const pts = s.points.map((pt, i) => i === dragging.index ? p : pt); return recalcSectionFromPoints({ ...s, points: pts }); }); return recalcAllFollowingSections(newSections, dragging.sectionId); }); return; }
+        if (dragging.active) { setSections(prev => { const newSections = prev.map(s => { if (s.id !== dragging.sectionId) return s; const pts = s.points.map((pt, i) => i === dragging.index ? { ...pt, x: p.x, y: p.y } : pt); return recalcSectionFromPoints({ ...s, points: pts }); }); return recalcAllFollowingSections(newSections, dragging.sectionId); }); return; }
         if (!drawMode && currentSection) { const idx = hitTestNode(currentSection.points, p, 8); setHoverNode(idx > -1 ? { sectionId: currentSection.id, index: idx } : { sectionId: null, index: -1 }); return; }
         if (drawMode && currentSection) {
-            const last = currentSection.points.length ? currentSection.points[currentSection.points.length - 1] : computePoseUpToSection(currentSection.id);
-            const { p: pSnapped, theta } = snapPointByAngle(p, last);
+            const activeSession = drawSessionRef.current.active;
+            const anchor = activeSession && drawSessionRef.current.lastPoint
+                ? drawSessionRef.current.lastPoint
+                : (currentSection.points.length ? currentSection.points[currentSection.points.length - 1] : computePoseUpToSection(currentSection.id));
+            const { p: pSnapped, theta } = snapPointByAngle(p, anchor, reverseDrawing);
             setGhost({ x: pSnapped.x, y: pSnapped.y, theta });
+            if (activeSession) {
+                const dist = Math.hypot(pSnapped.x - anchor.x, pSnapped.y - anchor.y);
+                if (dist >= DRAW_STEP_MIN_PX) {
+                    setSections(prev => {
+                        const updated = prev.map(s => {
+                            if (s.id !== currentSection.id) return s;
+                            const newPts = [...s.points, { ...pSnapped, reverse: reverseDrawing }];
+                            return recalcSectionFromPoints({ ...s, points: newPts });
+                        });
+                        return recalcAllFollowingSections(updated, currentSection.id);
+                    });
+                    drawSessionRef.current = {
+                        active: true,
+                        lastPoint: { ...pSnapped, reverse: reverseDrawing },
+                        addedDuringDrag: true,
+                    };
+                }
+            }
         }
     };
 
@@ -870,8 +939,11 @@ export default function WROPlaybackPlanner() {
         }
         setDraggingStart(false);
         setDragging({ active: false, sectionId: null, index: -1 });
+        if (drawSessionRef.current.active) {
+            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: drawSessionRef.current.addedDuringDrag };
+        }
     };
-    
+
     const onCanvasClick = (e) => {
         if (isSettingOrigin) {
             const p = canvasPos(e, false);
@@ -881,10 +953,22 @@ export default function WROPlaybackPlanner() {
         }
         if (rulerActive) return;
         if (!drawMode || !currentSection) return;
+        if (drawSessionRef.current.addedDuringDrag) {
+            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false };
+            return;
+        }
         const raw = canvasPos(e);
         const last = currentSection.points.length ? currentSection.points[currentSection.points.length - 1] : computePoseUpToSection(currentSection.id);
-        const { p } = snapPointByAngle(raw, last); // <-- guardar el PUNTO ya ajustado por 15°
-        setSections(prev => prev.map(s => { if (s.id !== currentSection.id) return s; const newPts = [...s.points, p]; return recalcSectionFromPoints({ ...s, points: newPts }); }));
+        const { p } = snapPointByAngle(raw, last, reverseDrawing); // <-- guardar el PUNTO ya ajustado por 15°
+        setSections(prev => {
+            const updated = prev.map(s => {
+                if (s.id !== currentSection.id) return s;
+                const newPts = [...s.points, { ...p, reverse: reverseDrawing }];
+                return recalcSectionFromPoints({ ...s, points: newPts });
+            });
+            return recalcAllFollowingSections(updated, currentSection.id);
+        });
+        drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false };
     };
 
     const handleContextMenu = (e) => {
@@ -972,20 +1056,10 @@ export default function WROPlaybackPlanner() {
         animRef.current = requestAnimationFrame(tick);
     }, [tick]);
 
-    const buildReverseActions = useCallback((actions) => actions.map(act => act.type === 'move'
-        ? { ...act, distance: -act.distance }
-        : act
-    ), []);
-
     const startMission = useCallback(() => {
         const list = sections.flatMap(s => s.actions);
         startPlayback(list, initialPose);
     }, [sections, initialPose, startPlayback]);
-
-    const startMissionReverse = useCallback(() => {
-        const list = sections.flatMap(s => s.actions);
-        startPlayback(buildReverseActions(list), initialPose);
-    }, [sections, initialPose, buildReverseActions, startPlayback]);
 
     const startSection = useCallback(() => {
         if (!currentSection) return;
@@ -993,11 +1067,6 @@ export default function WROPlaybackPlanner() {
         startPlayback(currentSection.actions, startPose);
     }, [currentSection, computePoseUpToSection, startPlayback]);
 
-    const startSectionReverse = useCallback(() => {
-        if (!currentSection) return;
-        const sectionStartPose = computePoseUpToSection(currentSection.id);
-        startPlayback(buildReverseActions(currentSection.actions), sectionStartPose);
-    }, [currentSection, computePoseUpToSection, buildReverseActions, startPlayback]);
     const pauseResume = () => { if (!isRunning) return; setIsPaused(p => !p); };
 
     const handleRulerToggle = () => {
@@ -1031,16 +1100,14 @@ export default function WROPlaybackPlanner() {
                         isRunning,
                         isPaused,
                         startMission,
-                        startMissionReverse,
                         startSection,
-                        startSectionReverse,
                         pauseResume,
                         stopPlayback,
                         setShowOptions,
                         rulerActive,
                         handleRulerToggle,
-                        reversePlayback,
-                        onToggleReverse: toggleReversePlayback,
+                        reverseDrawing,
+                        onToggleReverse: toggleReverseDrawing,
                     }}
                 />
 
