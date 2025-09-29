@@ -13,7 +13,7 @@ import doubleTennisFieldImg from "./assets/WRO-2025_RoboSports_Double-Tennis_Pla
 
 /** @typedef {{x:number, y:number}} Vec2 */
 /** @typedef {{x:number, y:number, theta:number}} Pose */
-/** @typedef {{type:'move', distance:number} | {type:'rotate', angle:number}} Action */
+/** @typedef {{type:'move', distance:number, reference?:'center'|'tip'} | {type:'rotate', angle:number}} Action */
 /** @typedef {{id:string, name:string, points:Vec2[], actions:Action[], color?:string, isVisible:boolean}} Section */
 
 const DEG2RAD = Math.PI / 180;
@@ -29,6 +29,7 @@ const FIELD_PRESETS = [
 ];
 const DEFAULT_GRID = { cellSize: 1, pixelsPerUnit: 5, lineAlpha: 0.35, offsetX: 0, offsetY: 0 };
 const DEFAULT_ROBOT = { width: 18, length: 20, color: "#0ea5e9", imageSrc: null, opacity: 1 };
+const ZOOM_LIMITS = { min: 0.5, max: 2, step: 0.25 };
 
 const IconChevronLeft = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>;
 const IconChevronRight = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>;
@@ -437,37 +438,48 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
                                                     onDragOver={(e) => e.preventDefault()}
                                                     className={`section-card__actions ${isDragging ? 'opacity-60 border-dashed border-indigo-300' : 'border-slate-200/70'}`}
                                                 >
-                                                    <span className="cursor-move touch-none p-1 text-slate-400"><IconGripVertical /></span><span className="text-xs font-medium text-slate-600">{a.type === 'move' ? 'Avanzar' : 'Girar'}</span>
-                                                {a.type === 'move' ?
-                                                    (<label className="text-xs flex items-center gap-2">Dist ({unit})<input
-                                                        type="number"
-                                                        step={unit === 'mm' ? 0.1 : 0.01}
-                                                        className="w-full border border-slate-200/80 rounded-lg px-2 py-1 text-slate-700 bg-white/80"
-                                                        value={unit === 'mm' ? (a.distance * 10).toFixed(1) : a.distance.toFixed(2)}
-                                                        onChange={e => {
-                                                            const val = parseFloat(e.target.value) || 0;
-                                                            const cmValue = unit === 'mm' ? val / 10 : val;
-                                                            const newActions = s.actions.map((act, idx) => (i === idx ? { ...act, distance: cmValue } : act));
-                                                            updateSectionActions(s.id, newActions);
-                                                        }}
-                                                    /></label>) :
-                                                    (<label className="text-xs flex items-center gap-2">Ángulo (°)<input
-                                                        type="number"
-                                                        step="1"
-                                                        className="w-full border border-slate-200/80 rounded-lg px-2 py-1 text-slate-700 bg-white/80"
-                                                        value={a.angle}
-                                                        onChange={e => {
-                                                            const newActions = s.actions.map((act, idx) => (i === idx ? { ...act, angle: parseFloat(e.target.value) || 0 } : act));
-                                                            updateSectionActions(s.id, newActions);
-                                                        }}
-                                                    /></label>)
-                                                }
-                                            <button
-                                                onClick={() => { const newActions = s.actions.filter((_, idx) => idx !== i); updateSectionActions(s.id, newActions); }}
-                                                className="toolbar-btn toolbar-btn--rose px-2 py-1 text-[11px]"
-                                            >
-                                                Quitar
-                                            </button>
+                                                    <span className="cursor-move touch-none p-1 text-slate-400"><IconGripVertical /></span>
+                                                    <span className="text-xs font-medium text-slate-600">{a.type === 'move' ? 'Avanzar' : 'Girar'}</span>
+                                                    {a.type === 'move' ? (
+                                                        <div className="section-card__field">
+                                                            <label className="text-xs flex items-center gap-2">Dist ({unit})
+                                                                <input
+                                                                    type="number"
+                                                                    step={unit === 'mm' ? 0.1 : 0.01}
+                                                                    className="w-full border border-slate-200/80 rounded-lg px-2 py-1 text-slate-700 bg-white/80"
+                                                                    value={unit === 'mm' ? (a.distance * 10).toFixed(1) : a.distance.toFixed(2)}
+                                                                    onChange={e => {
+                                                                        const val = parseFloat(e.target.value) || 0;
+                                                                        const cmValue = unit === 'mm' ? val / 10 : val;
+                                                                        const newActions = s.actions.map((act, idx) => (i === idx ? { ...act, distance: cmValue } : act));
+                                                                        updateSectionActions(s.id, newActions);
+                                                                    }}
+                                                                />
+                                                            </label>
+                                                            <div className={`section-card__meta ${a.reference === 'tip' ? 'section-card__meta--tip' : 'section-card__meta--center'}`}>
+                                                                {a.reference === 'tip' ? 'Medido desde la punta del robot' : 'Medido desde el centro de las ruedas'}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <label className="text-xs flex items-center gap-2">Ángulo (°)
+                                                            <input
+                                                                type="number"
+                                                                step="1"
+                                                                className="w-full border border-slate-200/80 rounded-lg px-2 py-1 text-slate-700 bg-white/80"
+                                                                value={a.angle}
+                                                                onChange={e => {
+                                                                    const newActions = s.actions.map((act, idx) => (i === idx ? { ...act, angle: parseFloat(e.target.value) || 0 } : act));
+                                                                    updateSectionActions(s.id, newActions);
+                                                                }}
+                                                            />
+                                                        </label>
+                                                    )}
+                                                    <button
+                                                        onClick={() => { const newActions = s.actions.filter((_, idx) => idx !== i); updateSectionActions(s.id, newActions); }}
+                                                        className="toolbar-btn toolbar-btn--rose px-2 py-1 text-[11px]"
+                                                    >
+                                                        Quitar
+                                                    </button>
                                                 </div>
                                             );
                                         })
@@ -509,6 +521,12 @@ const Toolbar = ({
     handleRulerToggle,
     reverseDrawing,
     onToggleReverse,
+    referenceMode,
+    onReferenceModeChange,
+    zoom,
+    onZoomIn,
+    onZoomOut,
+    onZoomReset,
 }) => {
     const [quickMenu, setQuickMenu] = useState({ open: false, target: null, anchor: { x: 0, y: 0 } });
     const longPressTimerRef = useRef(null);
@@ -628,6 +646,8 @@ const Toolbar = ({
         if (isTurningOn) setSnapGrid(false);
     };
 
+    const zoomLabel = Math.round(zoom * 100);
+
     return (
         <div className="toolbar-card sticky top-4 z-20">
             <button
@@ -640,6 +660,27 @@ const Toolbar = ({
                 <span className="toolbar-reverse-state">{reverseDrawing ? 'Dibujando hacia atrás' : 'Dibujando hacia adelante'}</span>
                 <span className="toolbar-reverse-chip">Espacio</span>
             </button>
+            <div className="toolbar-group toolbar-group--measure">
+                <span className="toolbar-group__label">Referencia</span>
+                <div className="toolbar-segmented">
+                    <button
+                        type="button"
+                        className={`toolbar-segmented__btn ${referenceMode === 'center' ? 'toolbar-segmented__btn--active' : ''}`}
+                        onClick={() => onReferenceModeChange('center')}
+                        aria-pressed={referenceMode === 'center'}
+                    >
+                        Centro ruedas
+                    </button>
+                    <button
+                        type="button"
+                        className={`toolbar-segmented__btn ${referenceMode === 'tip' ? 'toolbar-segmented__btn--active' : ''}`}
+                        onClick={() => onReferenceModeChange('tip')}
+                        aria-pressed={referenceMode === 'tip'}
+                    >
+                        Punta robot
+                    </button>
+                </div>
+            </div>
             <button onClick={() => setDrawMode(d => !d)} className={`toolbar-btn w-28 ${drawMode ? 'toolbar-btn--emerald' : 'toolbar-btn--muted'}`}>
                 {drawMode ? 'Dibujando' : 'Editando'}
             </button>
@@ -671,6 +712,15 @@ const Toolbar = ({
             </button>
             <button onClick={pauseResume} disabled={!isRunning} className={`toolbar-btn ${isPaused ? 'toolbar-btn--emerald' : 'toolbar-btn--amber'}`}>{isPaused ? 'Reanudar' : 'Pausar'}</button>
             <button onClick={stopPlayback} disabled={!isRunning} className="toolbar-btn toolbar-btn--rose">Detener</button>
+            <div className="toolbar-group toolbar-group--zoom">
+                <span className="toolbar-group__label">Zoom</span>
+                <div className="toolbar-zoom-control">
+                    <button type="button" className="toolbar-zoom-btn" onClick={onZoomOut} aria-label="Alejar">−</button>
+                    <span className="toolbar-zoom-value">{zoomLabel}%</span>
+                    <button type="button" className="toolbar-zoom-btn" onClick={onZoomIn} aria-label="Acercar">+</button>
+                    <button type="button" className="toolbar-zoom-reset" onClick={onZoomReset}>Restablecer</button>
+                </div>
+            </div>
             <div className="ml-auto flex items-center gap-2 text-sm">
                 <button onClick={() => setShowOptions(true)} className="toolbar-btn toolbar-btn--slate">Opciones</button>
             </div>
@@ -709,7 +759,7 @@ export default function WROPlaybackPlanner() {
     const [drawMode, setDrawMode] = useState(true);
     const [snapGrid, setSnapGrid] = useState(true);
     const [snapAngles, setSnapAngles] = useState(false);
-    const [ghost, setGhost] = useState({ x: 0, y: 0, theta: 0 });
+    const [ghost, setGhost] = useState({ x: 0, y: 0, theta: 0, reference: 'center', displayX: 0, displayY: 0 });
     const [dragging, setDragging] = useState({ active: false, sectionId: null, index: -1 });
     const [hoverNode, setHoverNode] = useState({ sectionId: null, index: -1 });
     const [draggingStart, setDraggingStart] = useState(false);
@@ -723,6 +773,9 @@ export default function WROPlaybackPlanner() {
     const [isSettingOrigin, setIsSettingOrigin] = useState(false);
     const [unit, setUnit] = useState('cm');
     const [reverseDrawing, setReverseDrawing] = useState(false);
+    const [referenceMode, setReferenceMode] = useState('center');
+    const [zoom, setZoom] = useState(1);
+    const [canvasBaseSize, setCanvasBaseSize] = useState({ width: 0, height: 0 });
     const drawSessionRef = useRef({ active: false, lastPoint: null, addedDuringDrag: false });
     const DRAW_STEP_MIN_PX = 6;
 
@@ -744,6 +797,28 @@ export default function WROPlaybackPlanner() {
 
     const toggleReverseDrawing = useCallback(() => {
         setReverseDrawing(prev => !prev);
+    }, []);
+
+    const handleReferenceModeChange = useCallback((mode) => {
+        setReferenceMode(mode === 'tip' ? 'tip' : 'center');
+    }, []);
+
+    const handleZoomIn = useCallback(() => {
+        setZoom(prev => {
+            const next = Math.min(ZOOM_LIMITS.max, +(prev + ZOOM_LIMITS.step).toFixed(2));
+            return next;
+        });
+    }, []);
+
+    const handleZoomOut = useCallback(() => {
+        setZoom(prev => {
+            const next = Math.max(ZOOM_LIMITS.min, +(prev - ZOOM_LIMITS.step).toFixed(2));
+            return next;
+        });
+    }, []);
+
+    const handleZoomReset = useCallback(() => {
+        setZoom(1);
     }, []);
 
     useEffect(() => {
@@ -814,7 +889,7 @@ export default function WROPlaybackPlanner() {
             } else {
                 const distance = Number((-act.distance).toFixed(2));
                 if (Math.abs(distance) > 1e-3) {
-                    reversed.push({ type: 'move', distance });
+                    reversed.push({ type: 'move', distance, reference: act.reference || 'center' });
                 }
             }
         }
@@ -833,6 +908,7 @@ export default function WROPlaybackPlanner() {
                 continue;
             }
             const segmentReverse = Boolean(pt.reverse);
+            const segmentReference = pt.reference || 'center';
             const headingToPoint = Math.atan2(dy, dx);
             let targetHeading = normalizeAngle(headingToPoint + (segmentReverse ? Math.PI : 0));
             let ang = normalizeAngle(targetHeading - prev.theta);
@@ -847,7 +923,7 @@ export default function WROPlaybackPlanner() {
             const cm = pxToUnit(distPx);
             if (cm > 1e-3) {
                 const signed = segmentReverse ? -cm : cm;
-                acts.push({ type: 'move', distance: Number(signed.toFixed(2)) });
+                acts.push({ type: 'move', distance: Number(signed.toFixed(2)), reference: segmentReference });
             }
             prev = { x: pt.x, y: pt.y, theta: targetHeading };
         }
@@ -864,7 +940,7 @@ export default function WROPlaybackPlanner() {
                 const dx = Math.cos(pose.theta) * unitToPx(a.distance);
                 const dy = Math.sin(pose.theta) * unitToPx(a.distance);
                 pose = { x: pose.x + dx, y: pose.y + dy, theta: pose.theta };
-                pts.push({ x: pose.x, y: pose.y, reverse: a.distance < 0 });
+                pts.push({ x: pose.x, y: pose.y, reverse: a.distance < 0, reference: a.reference || 'center' });
             }
         }
         return pts;
@@ -936,8 +1012,35 @@ export default function WROPlaybackPlanner() {
         ctx.save(); ctx.translate(pose.x, pose.y); ctx.rotate(pose.theta);
         const w = unitToPx(robot.width), l = unitToPx(robot.length);
         ctx.globalAlpha = (isGhost ? 0.5 : 1) * (robot.opacity ?? 1);
-        if (robotImgObj) { ctx.drawImage(robotImgObj, -l / 2, -w / 2, l, w); }
-        else { ctx.fillStyle = robot.color; ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.rect(-l / 2, -w / 2, l, w); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(l / 2, 0); ctx.lineTo(l / 2 - unitToPx(2.5), unitToPx(1.5)); ctx.lineTo(l / 2 - unitToPx(2.5), -unitToPx(1.5)); ctx.closePath(); ctx.fillStyle = '#0f172a'; ctx.fill(); }
+        if (robotImgObj) {
+            ctx.drawImage(robotImgObj, -l / 2, -w / 2, l, w);
+        } else {
+            const wheelThickness = Math.max(unitToPx(1), Math.min(unitToPx(2), w * 0.32));
+            const wheelLength = Math.max(l - unitToPx(4), l * 0.78);
+            const wheelOffsetX = -wheelLength / 2;
+            const wheelOffsetY = w / 2 + wheelThickness * 0.15;
+            ctx.fillStyle = '#1f293b';
+            ctx.fillRect(wheelOffsetX, -wheelOffsetY - wheelThickness, wheelLength, wheelThickness);
+            ctx.fillRect(wheelOffsetX, wheelOffsetY, wheelLength, wheelThickness);
+
+            ctx.fillStyle = robot.color;
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.rect(-l / 2, -w / 2, l, w);
+            ctx.fill();
+            ctx.stroke();
+
+            const noseInset = unitToPx(3);
+            const noseHalf = Math.min(unitToPx(2), w * 0.35);
+            ctx.beginPath();
+            ctx.moveTo(l / 2, 0);
+            ctx.lineTo(l / 2 - noseInset, noseHalf);
+            ctx.lineTo(l / 2 - noseInset, -noseHalf);
+            ctx.closePath();
+            ctx.fillStyle = '#0f172a';
+            ctx.fill();
+        }
         ctx.restore();
     }, [robot, robotImgObj, unitToPx]);
 
@@ -955,18 +1058,35 @@ export default function WROPlaybackPlanner() {
             ctx.restore();
         }
         
-        ctx.lineWidth = 3;
         sections.forEach(s => {
             if (s.isVisible === false || !s.points.length) return;
-            ctx.strokeStyle = s.color || '#000';
-            const start = computePoseUpToSection(s.id);
-            ctx.beginPath(); ctx.moveTo(start.x, start.y);
-            s.points.forEach(p => ctx.lineTo(p.x, p.y));
-            ctx.stroke();
+            let prev = computePoseUpToSection(s.id);
+            s.points.forEach((pt) => {
+                const reference = pt.reference || 'center';
+                ctx.save();
+                ctx.lineWidth = reference === 'tip' ? 3.5 : 3;
+                ctx.strokeStyle = s.color || '#000';
+                ctx.setLineDash(reference === 'tip' ? [12, 8] : []);
+                ctx.beginPath();
+                ctx.moveTo(prev.x, prev.y);
+                ctx.lineTo(pt.x, pt.y);
+                ctx.stroke();
+                ctx.restore();
+                prev = pt;
+            });
             if (!drawMode) {
                 s.points.forEach((pt, i) => {
-                    ctx.beginPath(); const isActive = (dragging.active && dragging.sectionId === s.id && dragging.index === i) || (hoverNode.sectionId === s.id && hoverNode.index === i);
-                    ctx.arc(pt.x, pt.y, isActive ? 6 : 4, 0, Math.PI * 2); ctx.fillStyle = s.color || '#111827'; ctx.fill();
+                    ctx.beginPath();
+                    const isActive = (dragging.active && dragging.sectionId === s.id && dragging.index === i) || (hoverNode.sectionId === s.id && hoverNode.index === i);
+                    const radius = isActive ? 6 : 4;
+                    ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
+                    ctx.fillStyle = s.color || '#111827';
+                    ctx.fill();
+                    if (pt.reference === 'tip') {
+                        ctx.strokeStyle = '#f97316';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                    }
                 });
             }
         });
@@ -982,7 +1102,17 @@ export default function WROPlaybackPlanner() {
             drawRobot(ctx, finalPose, false);
             if (drawMode) {
                 const lastPoint = currentSection.points.length > 0 ? currentSection.points[currentSection.points.length - 1] : computePoseUpToSection(currentSection.id);
-                ctx.save(); ctx.setLineDash([8, 6]); ctx.strokeStyle = currentSection.color || '#64748b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(lastPoint.x, lastPoint.y); ctx.lineTo(ghost.x, ghost.y); ctx.stroke(); ctx.restore();
+                const previewX = Number.isFinite(ghost.displayX) ? ghost.displayX : ghost.x;
+                const previewY = Number.isFinite(ghost.displayY) ? ghost.displayY : ghost.y;
+                ctx.save();
+                ctx.setLineDash(ghost.reference === 'tip' ? [10, 6] : [8, 6]);
+                ctx.strokeStyle = ghost.reference === 'tip' ? '#fb923c' : (currentSection.color || '#64748b');
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(lastPoint.x, lastPoint.y);
+                ctx.lineTo(previewX, previewY);
+                ctx.stroke();
+                ctx.restore();
             }
         }
 
@@ -1011,14 +1141,43 @@ export default function WROPlaybackPlanner() {
 
     useEffect(() => { const preset = FIELD_PRESETS.find(p => p.key === fieldKey); if (!preset || !preset.bg) { setBgImage(null); return; } const img = new Image(); img.onload = () => setBgImage(img); img.src = preset.bg; }, [fieldKey]);
     useEffect(() => { if (!robot.imageSrc) { setRobotImgObj(null); return; } const img = new Image(); img.onload = () => setRobotImgObj(img); img.src = robot.imageSrc; }, [robot.imageSrc]);
-    useEffect(() => { const onResize = () => { const el = containerRef.current, cvs = canvasRef.current; if (!el || !cvs) return; const r = el.getBoundingClientRect(); const targetAspect = MAT_CM.w / MAT_CM.h; const cssW = Math.floor(r.width); const cssH = Math.floor(cssW / targetAspect); cvs.width = cssW; cvs.height = cssH; cvs.style.width = cssW + 'px'; cvs.style.height = cssH + 'px'; setGrid(g => ({ ...g, pixelsPerUnit: cssW / MAT_CM.w })); }; onResize(); window.addEventListener('resize', onResize); return () => window.removeEventListener('resize', onResize); }, []);
+    useEffect(() => {
+        const handleResize = () => {
+            const el = containerRef.current;
+            const cvs = canvasRef.current;
+            if (!el || !cvs) return;
+            const r = el.getBoundingClientRect();
+            const targetAspect = MAT_CM.w / MAT_CM.h;
+            const cssW = Math.max(200, Math.floor(r.width));
+            const cssH = Math.floor(cssW / targetAspect);
+            cvs.width = cssW;
+            cvs.height = cssH;
+            setCanvasBaseSize({ width: cssW, height: cssH });
+            setGrid(g => ({ ...g, pixelsPerUnit: cssW / MAT_CM.w }));
+        };
+        handleResize();
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, [setGrid]);
+
+    useEffect(() => {
+        const cvs = canvasRef.current;
+        if (!cvs) return;
+        const { width, height } = canvasBaseSize;
+        if (!width || !height) return;
+        cvs.style.width = `${width * zoom}px`;
+        cvs.style.height = `${height * zoom}px`;
+    }, [canvasBaseSize, zoom]);
     useEffect(() => { const handleKeyDown = (e) => { if (e.key === 'Escape') { setDrawMode(false); } }; window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, []);
     useEffect(() => { draw(); }, [draw]);
 
     const canvasPos = (e, applySnapping = true) => {
-        const rect = canvasRef.current.getBoundingClientRect();
-        let x = e.clientX - rect.left;
-        let y = e.clientY - rect.top;
+        const canvasEl = canvasRef.current;
+        const rect = canvasEl.getBoundingClientRect();
+        const scaleX = rect.width > 0 ? (canvasEl.width / rect.width) : 1;
+        const scaleY = rect.height > 0 ? (canvasEl.height / rect.height) : 1;
+        let x = (e.clientX - rect.left) * scaleX;
+        let y = (e.clientY - rect.top) * scaleY;
         if (snapGrid && applySnapping) {
             const step = unitToPx(grid.cellSize);
             x = Math.round((x - grid.offsetX) / step) * step + grid.offsetX;
@@ -1070,21 +1229,29 @@ export default function WROPlaybackPlanner() {
                 ? drawSessionRef.current.lastPoint
                 : (currentSection.points.length ? currentSection.points[currentSection.points.length - 1] : computePoseUpToSection(currentSection.id));
             const { p: pSnapped, theta } = snapPointByAngle(p, anchor, reverseDrawing);
-            setGhost({ x: pSnapped.x, y: pSnapped.y, theta });
+            const segmentReference = referenceMode;
+            setGhost({
+                x: pSnapped.x,
+                y: pSnapped.y,
+                theta,
+                reference: segmentReference,
+                displayX: pSnapped.x,
+                displayY: pSnapped.y,
+            });
             if (activeSession) {
                 const dist = Math.hypot(pSnapped.x - anchor.x, pSnapped.y - anchor.y);
                 if (dist >= DRAW_STEP_MIN_PX) {
                     setSections(prev => {
                         const updated = prev.map(s => {
                             if (s.id !== currentSection.id) return s;
-                            const newPts = [...s.points, { ...pSnapped, reverse: reverseDrawing }];
+                            const newPts = [...s.points, { ...pSnapped, reverse: reverseDrawing, reference: segmentReference, heading: theta }];
                             return recalcSectionFromPoints({ ...s, points: newPts });
                         });
                         return recalcAllFollowingSections(updated, currentSection.id);
                     });
                     drawSessionRef.current = {
                         active: true,
-                        lastPoint: { ...pSnapped, reverse: reverseDrawing },
+                        lastPoint: { ...pSnapped, reverse: reverseDrawing, reference: segmentReference, heading: theta },
                         addedDuringDrag: true,
                     };
                 }
@@ -1119,11 +1286,12 @@ export default function WROPlaybackPlanner() {
         }
         const raw = canvasPos(e);
         const last = currentSection.points.length ? currentSection.points[currentSection.points.length - 1] : computePoseUpToSection(currentSection.id);
-        const { p } = snapPointByAngle(raw, last, reverseDrawing); // <-- guardar el PUNTO ya ajustado por 15°
+        const { p, theta } = snapPointByAngle(raw, last, reverseDrawing); // <-- guardar el PUNTO ya ajustado por 15°
+        const segmentReference = referenceMode;
         setSections(prev => {
             const updated = prev.map(s => {
                 if (s.id !== currentSection.id) return s;
-                const newPts = [...s.points, { ...p, reverse: reverseDrawing }];
+                const newPts = [...s.points, { ...p, reverse: reverseDrawing, reference: segmentReference, heading: theta }];
                 return recalcSectionFromPoints({ ...s, points: newPts });
             });
             return recalcAllFollowingSections(updated, currentSection.id);
@@ -1290,6 +1458,12 @@ export default function WROPlaybackPlanner() {
                         handleRulerToggle,
                         reverseDrawing,
                         onToggleReverse: toggleReverseDrawing,
+                        referenceMode,
+                        onReferenceModeChange: handleReferenceModeChange,
+                        zoom,
+                        onZoomIn: handleZoomIn,
+                        onZoomOut: handleZoomOut,
+                        onZoomReset: handleZoomReset,
                     }}
                 />
 
@@ -1303,7 +1477,7 @@ export default function WROPlaybackPlanner() {
 
                     {/* AREA DEL CANVAS (card limpia) */}
                     <section className="canvas-card" aria-label="Canvas">
-                        <div ref={containerRef} style={{ width: '100%' }}>
+                        <div className="canvas-board" ref={containerRef}>
                             <canvas
                                 ref={canvasRef}
                                 onMouseMove={onCanvasMove}
@@ -1312,8 +1486,18 @@ export default function WROPlaybackPlanner() {
                                 onMouseLeave={onCanvasUp}
                                 onClick={onCanvasClick}
                                 onContextMenu={handleContextMenu}
-                                className={`${isSettingOrigin ? 'cursor-copy' : 'cursor-crosshair'}`}
+                                className={`canvas-surface ${isSettingOrigin ? 'cursor-copy' : 'cursor-crosshair'}`}
                             />
+                        </div>
+                        <div className="canvas-legend" aria-hidden="true">
+                            <div className="canvas-legend__item">
+                                <span className="canvas-legend__swatch canvas-legend__swatch--center" />
+                                <span>Centro de ruedas</span>
+                            </div>
+                            <div className="canvas-legend__item">
+                                <span className="canvas-legend__swatch canvas-legend__swatch--tip" />
+                                <span>Punta del robot</span>
+                            </div>
                         </div>
                     </section>
                 </div>
