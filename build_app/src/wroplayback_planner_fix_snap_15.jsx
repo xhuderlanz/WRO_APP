@@ -499,7 +499,9 @@ const Toolbar = ({
     isRunning,
     isPaused,
     startMission,
+    startMissionReverse,
     startSection,
+    startSectionReverse,
     pauseResume,
     stopPlayback,
     setShowOptions,
@@ -508,13 +510,111 @@ const Toolbar = ({
     reverseDrawing,
     onToggleReverse,
 }) => {
-    const handleMissionClick = useCallback(() => {
-        startMission();
-    }, [startMission]);
+    const [quickMenu, setQuickMenu] = useState({ open: false, target: null, anchor: { x: 0, y: 0 } });
+    const longPressTimerRef = useRef(null);
+    const pointerStateRef = useRef({ pointerId: null, target: null, triggered: false });
+    const ignoreClickRef = useRef(false);
+    const LONG_PRESS_DELAY = 350;
 
-    const handleSectionClick = useCallback(() => {
-        startSection();
-    }, [startSection]);
+    const closeQuickMenu = useCallback(() => {
+        setQuickMenu({ open: false, target: null, anchor: { x: 0, y: 0 } });
+    }, []);
+
+    useEffect(() => {
+        if (!quickMenu.open) return undefined;
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                closeQuickMenu();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [quickMenu.open, closeQuickMenu]);
+
+    const clearLongPressTimer = () => {
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+    };
+
+    const triggerQuickMenu = useCallback((target, buttonElement) => {
+        const rect = buttonElement.getBoundingClientRect();
+        setQuickMenu({
+            open: true,
+            target,
+            anchor: {
+                x: rect.right + 12,
+                y: rect.top + rect.height / 2,
+            },
+        });
+    }, []);
+
+    const handlePointerDown = useCallback((event, target) => {
+        if (event.button !== 0) return;
+        ignoreClickRef.current = false;
+        pointerStateRef.current = { pointerId: event.pointerId, target, triggered: false };
+        event.currentTarget.setPointerCapture(event.pointerId);
+        clearLongPressTimer();
+        longPressTimerRef.current = window.setTimeout(() => {
+            ignoreClickRef.current = true;
+            pointerStateRef.current = { pointerId: event.pointerId, target, triggered: true };
+            triggerQuickMenu(target, event.currentTarget);
+            longPressTimerRef.current = null;
+        }, LONG_PRESS_DELAY);
+    }, [triggerQuickMenu]);
+
+    const handlePointerUp = useCallback((event, target) => {
+        const state = pointerStateRef.current;
+        if (state.pointerId !== event.pointerId || state.target !== target) {
+            return;
+        }
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        pointerStateRef.current = { pointerId: null, target: null, triggered: false };
+        clearLongPressTimer();
+    }, []);
+
+    const handlePointerCancel = useCallback((event) => {
+        const state = pointerStateRef.current;
+        if (state.pointerId !== event.pointerId) return;
+        clearLongPressTimer();
+        if (event.currentTarget?.hasPointerCapture?.(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        pointerStateRef.current = { pointerId: null, target: null, triggered: false };
+        ignoreClickRef.current = false;
+    }, []);
+
+    const handleClick = useCallback((event, onForward) => {
+        if (ignoreClickRef.current) {
+            ignoreClickRef.current = false;
+            event.preventDefault();
+            return;
+        }
+        onForward();
+    }, []);
+
+    const runForward = useCallback((target) => {
+        if (target === 'mission') {
+            startMission();
+        } else {
+            startSection();
+        }
+    }, [startMission, startSection]);
+
+    const runReverse = useCallback((target) => {
+        if (target === 'mission') {
+            startMissionReverse();
+        } else {
+            startSectionReverse();
+        }
+        closeQuickMenu();
+    }, [startMissionReverse, startSectionReverse, closeQuickMenu]);
+
+    const handleQuickForward = useCallback((target) => {
+        runForward(target);
+        closeQuickMenu();
+    }, [runForward, closeQuickMenu]);
 
     const handleSnapGridToggle = () => {
         const isTurningOn = !snapGrid;
@@ -550,13 +650,21 @@ const Toolbar = ({
             <button onClick={handleSnapGridToggle} className={`toolbar-btn ${snapGrid ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}>Snap Grid</button>
             <div className="toolbar-divider" />
             <button
-                onClick={handleMissionClick}
+                onPointerDown={(event) => handlePointerDown(event, 'mission')}
+                onPointerUp={(event) => handlePointerUp(event, 'mission')}
+                onPointerLeave={handlePointerCancel}
+                onPointerCancel={handlePointerCancel}
+                onClick={(event) => handleClick(event, startMission)}
                 className="toolbar-btn toolbar-btn--sky"
             >
                 Misión ▶
             </button>
             <button
-                onClick={handleSectionClick}
+                onPointerDown={(event) => handlePointerDown(event, 'section')}
+                onPointerUp={(event) => handlePointerUp(event, 'section')}
+                onPointerLeave={handlePointerCancel}
+                onPointerCancel={handlePointerCancel}
+                onClick={(event) => handleClick(event, startSection)}
                 className="toolbar-btn toolbar-btn--indigo"
             >
                 Sección ▶
@@ -566,6 +674,22 @@ const Toolbar = ({
             <div className="ml-auto flex items-center gap-2 text-sm">
                 <button onClick={() => setShowOptions(true)} className="toolbar-btn toolbar-btn--slate">Opciones</button>
             </div>
+
+            {quickMenu.open && (
+                <div className="playback-menu" role="dialog" aria-modal="true">
+                    <div className="playback-menu__backdrop" role="presentation" onClick={closeQuickMenu} />
+                    <div
+                        className={`playback-menu__panel playback-menu__panel--${quickMenu.target}`}
+                        style={{ top: `${quickMenu.anchor.y}px`, left: `${quickMenu.anchor.x}px` }}
+                    >
+                        <div className="playback-menu__title">{quickMenu.target === 'mission' ? 'Reproducir misión' : 'Reproducir sección'}</div>
+                        <div className="playback-menu__actions">
+                            <button type="button" className="playback-menu__btn playback-menu__btn--forward" onClick={() => handleQuickForward(quickMenu.target)}>▶ Adelante</button>
+                            <button type="button" className="playback-menu__btn playback-menu__btn--reverse" onClick={() => runReverse(quickMenu.target)}>◀ Reversa</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -654,12 +778,48 @@ export default function WROPlaybackPlanner() {
         for (const s of sections) {
             if (sectionId && s.id === sectionId) break;
             for (const act of s.actions) {
-                if (act.type === 'rotate') { pose.theta += act.angle * DEG2RAD; }
+                if (act.type === 'rotate') { pose.theta = normalizeAngle(pose.theta + act.angle * DEG2RAD); }
                 else { pose.x += Math.cos(pose.theta) * unitToPx(act.distance); pose.y += Math.sin(pose.theta) * unitToPx(act.distance); }
             }
         }
         return pose;
-    }, [sections, initialPose, unitToPx]);
+    }, [sections, initialPose, unitToPx, normalizeAngle]);
+
+    const computePoseAfterActions = useCallback((startPose, actions) => {
+        let pose = { ...startPose };
+        for (const act of actions) {
+            if (act.type === 'rotate') {
+                pose.theta = normalizeAngle(pose.theta + act.angle * DEG2RAD);
+            } else {
+                const delta = unitToPx(act.distance);
+                pose = {
+                    x: pose.x + Math.cos(pose.theta) * delta,
+                    y: pose.y + Math.sin(pose.theta) * delta,
+                    theta: pose.theta,
+                };
+            }
+        }
+        return pose;
+    }, [unitToPx, normalizeAngle]);
+
+    const buildReversePlayback = useCallback((actions) => {
+        const reversed = [];
+        for (let i = actions.length - 1; i >= 0; i -= 1) {
+            const act = actions[i];
+            if (act.type === 'rotate') {
+                const angle = Number((-act.angle).toFixed(2));
+                if (Math.abs(angle) > 1e-3) {
+                    reversed.push({ type: 'rotate', angle });
+                }
+            } else {
+                const distance = Number((-act.distance).toFixed(2));
+                if (Math.abs(distance) > 1e-3) {
+                    reversed.push({ type: 'move', distance });
+                }
+            }
+        }
+        return reversed;
+    }, []);
 
     const buildActionsFromPolyline = useCallback((points, startPose) => {
         const acts = [];
@@ -1061,11 +1221,31 @@ export default function WROPlaybackPlanner() {
         startPlayback(list, initialPose);
     }, [sections, initialPose, startPlayback]);
 
+    const startMissionReverse = useCallback(() => {
+        const list = sections.flatMap(s => s.actions);
+        if (!list.length) return;
+        const endPose = computePoseAfterActions(initialPose, list);
+        const reverseList = buildReversePlayback(list);
+        if (!reverseList.length) return;
+        startPlayback(reverseList, endPose);
+    }, [sections, initialPose, computePoseAfterActions, buildReversePlayback, startPlayback]);
+
     const startSection = useCallback(() => {
         if (!currentSection) return;
         const startPose = computePoseUpToSection(currentSection.id);
         startPlayback(currentSection.actions, startPose);
     }, [currentSection, computePoseUpToSection, startPlayback]);
+
+    const startSectionReverse = useCallback(() => {
+        if (!currentSection) return;
+        const forwardList = currentSection.actions;
+        if (!forwardList.length) return;
+        const startPose = computePoseUpToSection(currentSection.id);
+        const endPose = computePoseAfterActions(startPose, forwardList);
+        const reverseList = buildReversePlayback(forwardList);
+        if (!reverseList.length) return;
+        startPlayback(reverseList, endPose);
+    }, [currentSection, computePoseUpToSection, computePoseAfterActions, buildReversePlayback, startPlayback]);
 
     const pauseResume = () => { if (!isRunning) return; setIsPaused(p => !p); };
 
@@ -1100,7 +1280,9 @@ export default function WROPlaybackPlanner() {
                         isRunning,
                         isPaused,
                         startMission,
+                        startMissionReverse,
                         startSection,
+                        startSectionReverse,
                         pauseResume,
                         stopPlayback,
                         setShowOptions,
