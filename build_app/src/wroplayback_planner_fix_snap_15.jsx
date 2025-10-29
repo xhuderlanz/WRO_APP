@@ -27,8 +27,132 @@ const FIELD_PRESETS = [
 ];
 const DEFAULT_GRID = { cellSize: 1, pixelsPerUnit: 5, lineAlpha: 0.35, offsetX: 0, offsetY: 0 };
 const DEFAULT_ROBOT = { width: 18, length: 20, color: "#0ea5e9", imageSrc: null, opacity: 1 };
+const DEFAULT_OBSTACLE_SIZE = { width: 80, height: 80 };
+const DEFAULT_OBSTACLE_COLOR = "#ef4444";
+const DEFAULT_OBSTACLE_OPACITY = 0.35;
+const OBSTACLE_RENDER = { fill: "rgba(248,113,113,0.25)", stroke: "#ef4444", blockedStroke: "#dc2626" };
+const OBSTACLE_HANDLE_SIZE = 10;
+const OBSTACLE_DRAG_THRESHOLD = 4;
 const ZOOM_LIMITS = { min: 0.5, max: 2, step: 0.25 };
 const SNAP_45_BASE_ANGLES = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
+
+const toRect = (obstacle) => {
+    const halfW = (obstacle.width || DEFAULT_OBSTACLE_SIZE.width) / 2;
+    const halfH = (obstacle.height || DEFAULT_OBSTACLE_SIZE.height) / 2;
+    return {
+        left: obstacle.x - halfW,
+        right: obstacle.x + halfW,
+        top: obstacle.y - halfH,
+        bottom: obstacle.y + halfH,
+    };
+};
+
+const pointInRect = (point, rect) => point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom;
+
+const orientation = (p, q, r) => {
+    const val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+    if (Math.abs(val) < 1e-9) return 0;
+    return val > 0 ? 1 : 2;
+};
+
+const onSegment = (p, q, r) => q.x <= Math.max(p.x, r.x) + 1e-9 && q.x + 1e-9 >= Math.min(p.x, r.x) && q.y <= Math.max(p.y, r.y) + 1e-9 && q.y + 1e-9 >= Math.min(p.y, r.y);
+
+const segmentsIntersect = (p1, p2, q1, q2) => {
+    const o1 = orientation(p1, p2, q1);
+    const o2 = orientation(p1, p2, q2);
+    const o3 = orientation(q1, q2, p1);
+    const o4 = orientation(q1, q2, p2);
+
+    if (o1 !== o2 && o3 !== o4) return true;
+
+    if (o1 === 0 && onSegment(p1, q1, p2)) return true;
+    if (o2 === 0 && onSegment(p1, q2, p2)) return true;
+    if (o3 === 0 && onSegment(q1, p1, q2)) return true;
+    if (o4 === 0 && onSegment(q1, p2, q2)) return true;
+
+    return false;
+};
+
+const sameIdList = (a = [], b = []) => {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    const sortedA = [...a].sort();
+    const sortedB = [...b].sort();
+    return sortedA.every((val, idx) => val === sortedB[idx]);
+};
+
+const hexToRgba = (hex, alpha = 1) => {
+    if (typeof hex !== 'string') return `rgba(239,68,68,${alpha})`;
+    let sanitized = hex.trim().replace(/^#/, '');
+    if (sanitized.length === 3) {
+        sanitized = sanitized.split('').map(ch => ch + ch).join('');
+    }
+    if (sanitized.length !== 6) return `rgba(239,68,68,${alpha})`;
+    const r = parseInt(sanitized.slice(0, 2), 16);
+    const g = parseInt(sanitized.slice(2, 4), 16);
+    const b = parseInt(sanitized.slice(4, 6), 16);
+    const clampedAlpha = Math.max(0, Math.min(1, alpha ?? 1));
+    return `rgba(${Number.isFinite(r) ? r : 239}, ${Number.isFinite(g) ? g : 68}, ${Number.isFinite(b) ? b : 68}, ${clampedAlpha})`;
+};
+
+const getContrastingHex = (hex) => {
+    if (typeof hex !== 'string') return '#ffffff';
+    let sanitized = hex.trim().replace(/^#/, '');
+    if (sanitized.length === 3) sanitized = sanitized.split('').map(ch => ch + ch).join('');
+    if (sanitized.length !== 6) return '#ffffff';
+    const r = parseInt(sanitized.slice(0, 2), 16) || 0;
+    const g = parseInt(sanitized.slice(2, 4), 16) || 0;
+    const b = parseInt(sanitized.slice(4, 6), 16) || 0;
+    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+    return luminance > 140 ? '#0f172a' : '#ffffff';
+};
+
+const pointInConvexPolygon = (point, polygon) => {
+    if (!Array.isArray(polygon) || polygon.length < 3) return false;
+    let sign = null;
+    for (let i = 0; i < polygon.length; i += 1) {
+        const a = polygon[i];
+        const b = polygon[(i + 1) % polygon.length];
+        const cross = (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+        if (cross === 0) continue;
+        const currentSign = Math.sign(cross);
+        if (sign == null) {
+            sign = currentSign;
+        } else if (currentSign !== sign) {
+            return false;
+        }
+    }
+    return true;
+};
+
+const polygonIntersectsRect = (polygon, rect) => {
+    if (!polygon || polygon.length < 3) return false;
+    if (polygon.some(pt => pointInRect(pt, rect))) return true;
+    const rectPoints = [
+        { x: rect.left, y: rect.top },
+        { x: rect.right, y: rect.top },
+        { x: rect.right, y: rect.bottom },
+        { x: rect.left, y: rect.bottom },
+    ];
+    if (rectPoints.some(pt => pointInConvexPolygon(pt, polygon))) return true;
+    for (let i = 0; i < polygon.length; i += 1) {
+        const p1 = polygon[i];
+        const p2 = polygon[(i + 1) % polygon.length];
+        const topLeft = rectPoints[0];
+        const topRight = rectPoints[1];
+        const bottomRight = rectPoints[2];
+        const bottomLeft = rectPoints[3];
+        if (
+            segmentsIntersect(p1, p2, topLeft, topRight) ||
+            segmentsIntersect(p1, p2, topRight, bottomRight) ||
+            segmentsIntersect(p1, p2, bottomRight, bottomLeft) ||
+            segmentsIntersect(p1, p2, bottomLeft, topLeft)
+        ) {
+            return true;
+        }
+    }
+    return false;
+};
 
 const IconChevronLeft = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>;
 const IconChevronRight = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>;
@@ -71,9 +195,7 @@ const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOp
     };
 
     const numericCellSize = isMM ? grid.cellSize * 10 : grid.cellSize;
-    const formattedCellSize = isMM ? numericCellSize.toFixed(1) : numericCellSize.toFixed(2);
-
-    return (
+    const formattedCellSize = isMM ? numericCellSize.toFixed(1) : numericCellSize.toFixed(2);return (
         <div className={`options-overlay ${showOptions ? 'options-overlay--visible' : ''}`} aria-hidden={!showOptions}>
             <div
                 className="options-overlay__backdrop"
@@ -360,8 +482,7 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
     const handleActionDragStart = (e, sectionId, actionIndex) => { setDraggedAction({ sectionId, actionIndex }); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ''); };
     const handleActionDrop = (e, targetSectionId, targetActionIndex) => { e.preventDefault(); if (!draggedAction || draggedAction.sectionId !== targetSectionId) return; const { actionIndex: draggedIndex } = draggedAction; if (draggedIndex === targetActionIndex) return; const section = sections.find(s => s.id === targetSectionId); if (!section) return; const reorderedActions = [...section.actions]; const [draggedItem] = reorderedActions.splice(draggedIndex, 1); reorderedActions.splice(targetActionIndex, 0, draggedItem); updateSectionActions(targetSectionId, reorderedActions); };
 
-    if (isCollapsed) {
-        return (
+    if (isCollapsed) {return (
             <div className="panel-card self-start flex items-center justify-center w-16 h-16">
                 <button
                     onClick={() => setIsCollapsed(false)}
@@ -372,9 +493,7 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
                 </button>
             </div>
         );
-    }
-
-    return (
+    }return (
         <div className="panel-card self-start">
             <div className="flex items-center justify-between gap-2">
                 <h2 className="text-xl font-semibold text-slate-700">Secciones</h2>
@@ -387,8 +506,7 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
             </div>
             <div className="section-scroll space-y-3">
                 {sections.map(s => {
-                    const isExpanded = expandedSections.includes(s.id);
-                    return (
+                    const isExpanded = expandedSections.includes(s.id);return (
                         <div
                             key={s.id}
                             className={`section-card ${selectedSectionId === s.id ? 'section-card--active' : ''}`}
@@ -427,8 +545,7 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
                                     <div className="text-xs text-slate-600 font-semibold">Acciones:</div>
                                     {s.actions.length === 0 ? (<div className="text-xs text-slate-500">Sin acciones. Dibuja para crear.</div>) : (
                                         s.actions.map((a, i) => {
-                                            const isDragging = draggedAction?.sectionId === s.id && draggedAction?.actionIndex === i;
-                                            return (
+                                            const isDragging = draggedAction?.sectionId === s.id && draggedAction?.actionIndex === i;return (
                                                 <div
                                                     key={i}
                                                     draggable
@@ -500,9 +617,176 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
     );
 };
 
+const ObstaclesPanel = ({ obstacles, addObstacle, updateObstacle, removeObstacle }) => {
+    const [collapsedIds, setCollapsedIds] = useState({});
+
+    useEffect(() => {
+        setCollapsedIds(prev => {
+            let changed = false;
+            const next = { ...prev };
+            obstacles.forEach(obs => {
+                if (next[obs.id] === undefined) {
+                    next[obs.id] = false;
+                    changed = true;
+                }
+            });
+            Object.keys(next).forEach(id => {
+                if (!obstacles.some(obs => obs.id === id)) {
+                    delete next[id];
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
+    }, [obstacles]);
+
+    const toggleCollapse = useCallback((id) => {
+        setCollapsedIds(prev => ({ ...prev, [id]: !prev[id] }));
+    }, []);
+
+    return (
+        <div className="panel-card self-start mt-4">
+            <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xl font-semibold text-slate-700">Obstáculos</h2>
+                <button
+                    onClick={addObstacle}
+                    className="toolbar-btn toolbar-btn--emerald text-sm px-3 py-1"
+                >
+                    + Agregar
+                </button>
+            </div>
+            {obstacles.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">
+                    No hay obstáculos definidos. Usa &quot;Agregar&quot; para colocar uno en el tapete.
+                </p>
+            ) : (
+                <div className="mt-4 flex flex-col gap-3">
+                    {obstacles.map(obstacle => (
+                        <div key={obstacle.id} className="section-card">
+                            <header className="section-card__header">
+                                <button
+                                    type="button"
+                                    className="toolbar-btn toolbar-btn--muted px-2 py-1"
+                                    onClick={(e) => { e.stopPropagation(); toggleCollapse(obstacle.id); }}
+                                >
+                                    {collapsedIds[obstacle.id] ? <IconChevronRight /> : <IconChevronDown />}
+                                </button>
+                                <input
+                                    type="text"
+                                    className="section-card__title-input"
+                                    value={obstacle.name}
+                                    onChange={e => updateObstacle(obstacle.id, { name: e.target.value })}
+                                />
+                                <div className="flex items-center gap-2">
+                                    <label className="flex items-center gap-1 text-xs text-slate-500">
+                                        <input
+                                            type="checkbox"
+                                            checked={obstacle.isActive !== false}
+                                            onChange={e => updateObstacle(obstacle.id, { isActive: e.target.checked })}
+                                        />
+                                        Activo
+                                    </label>
+                                    <button
+                                        onClick={() => removeObstacle(obstacle.id)}
+                                        className="toolbar-btn toolbar-btn--rose text-xs px-2 py-1"
+                                    >
+                                        Quitar
+                                    </button>
+                                </div>
+                            </header>
+                            {!collapsedIds[obstacle.id] && (
+                                <div className="section-card__grid section-card__grid--two">
+                                    <label className="section-card__field">
+                                        <span className="section-card__label">Posición X (px)</span>
+                                        <input
+                                            type="number"
+                                            className="section-card__input"
+                                            value={Math.round(obstacle.x)}
+                                            onChange={e => {
+                                                const val = Number(e.target.value);
+                                                if (Number.isFinite(val)) updateObstacle(obstacle.id, { x: val });
+                                            }}
+                                        />
+                                    </label>
+                                    <label className="section-card__field">
+                                        <span className="section-card__label">Posición Y (px)</span>
+                                        <input
+                                            type="number"
+                                            className="section-card__input"
+                                            value={Math.round(obstacle.y)}
+                                            onChange={e => {
+                                                const val = Number(e.target.value);
+                                                if (Number.isFinite(val)) updateObstacle(obstacle.id, { y: val });
+                                            }}
+                                        />
+                                    </label>
+                                    <label className="section-card__field">
+                                        <span className="section-card__label">Ancho (px)</span>
+                                        <input
+                                            type="number"
+                                            min="10"
+                                            className="section-card__input"
+                                            value={Math.round(obstacle.width)}
+                                            onChange={e => {
+                                                const val = Math.max(10, Number(e.target.value) || 10);
+                                                updateObstacle(obstacle.id, { width: val });
+                                            }}
+                                        />
+                                    </label>
+                                    <label className="section-card__field">
+                                        <span className="section-card__label">Alto (px)</span>
+                                        <input
+                                            type="number"
+                                            min="10"
+                                            className="section-card__input"
+                                            value={Math.round(obstacle.height)}
+                                            onChange={e => {
+                                                const val = Math.max(10, Number(e.target.value) || 10);
+                                                updateObstacle(obstacle.id, { height: val });
+                                            }}
+                                        />
+                                    </label>
+                                    <label className="section-card__field">
+                                        <span className="section-card__label">Color</span>
+                                        <input
+                                            type="color"
+                                            className="section-card__input"
+                                            value={obstacle.fillColor || DEFAULT_OBSTACLE_COLOR}
+                                            onChange={e => updateObstacle(obstacle.id, { fillColor: e.target.value })}
+                                        />
+                                    </label>
+                                    <label className="section-card__field">
+                                        <span className="section-card__label">Opacidad</span>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="range"
+                                                min="0"
+                                                max="1"
+                                                step="0.05"
+                                                value={Number.isFinite(obstacle.opacity) ? obstacle.opacity : DEFAULT_OBSTACLE_OPACITY}
+                                                onChange={e => updateObstacle(obstacle.id, { opacity: Number(e.target.value) })}
+                                                className="flex-1"
+                                            />
+                                            <span className="text-xs text-slate-600 w-10 text-right">
+                                                {Math.round(((Number.isFinite(obstacle.opacity) ? obstacle.opacity : DEFAULT_OBSTACLE_OPACITY) || 0) * 100)}%
+                                            </span>
+                                        </div>
+                                    </label>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
 const Toolbar = ({
     drawMode,
     setDrawMode,
+    obstacleMode,
+    setObstacleMode,
     snap45,
     setSnap45,
     snapGrid,
@@ -526,6 +810,7 @@ const Toolbar = ({
     onZoomIn,
     onZoomOut,
     onZoomReset,
+    showZoomGroup = true,
 }) => {
     const [quickMenu, setQuickMenu] = useState({ open: false, target: null, anchor: { x: 0, y: 0 } });
     const longPressTimerRef = useRef(null);
@@ -642,9 +927,7 @@ const Toolbar = ({
         setSnap45(prev => !prev);
     }, [setSnap45]);
 
-    const zoomLabel = Math.round(zoom * 100);
-
-    return (
+    const zoomLabel = Math.round(zoom * 100);return (
         <div className="toolbar-card sticky top-4 z-20">
             <button
                 type="button"
@@ -677,8 +960,11 @@ const Toolbar = ({
                     </button>
                 </div>
             </div>
-            <button onClick={() => setDrawMode(d => !d)} className={`toolbar-btn w-28 ${drawMode ? 'toolbar-btn--emerald' : 'toolbar-btn--muted'}`}>
+            <button onClick={() => setDrawMode(d => !d)} disabled={obstacleMode} className={`toolbar-btn w-28 ${drawMode ? 'toolbar-btn--emerald' : 'toolbar-btn--muted'} ${obstacleMode ? 'opacity-60 pointer-events-none' : ''}`}>
                 {drawMode ? 'Dibujando' : 'Editando'}
+            </button>
+            <button onClick={() => setObstacleMode(prev => !prev)} className={`toolbar-btn ${obstacleMode ? 'toolbar-btn--rose' : 'toolbar-btn--muted'}`} aria-pressed={obstacleMode}>
+                Obstáculos
             </button>
             <button onClick={handleRulerToggle} className={`toolbar-btn ${rulerActive ? 'toolbar-btn--rose' : 'toolbar-btn--muted'}`}>
                 <IconRuler /> Regla
@@ -714,15 +1000,17 @@ const Toolbar = ({
             </button>
             <button onClick={pauseResume} disabled={!isRunning} className={`toolbar-btn ${isPaused ? 'toolbar-btn--emerald' : 'toolbar-btn--amber'}`}>{isPaused ? 'Reanudar' : 'Pausar'}</button>
             <button onClick={stopPlayback} disabled={!isRunning} className="toolbar-btn toolbar-btn--rose">Detener</button>
-            <div className="toolbar-group toolbar-group--zoom">
-                <span className="toolbar-group__label">Zoom</span>
-                <div className="toolbar-zoom-control">
-                    <button type="button" className="toolbar-zoom-btn" onClick={onZoomOut} aria-label="Alejar">−</button>
-                    <span className="toolbar-zoom-value">{zoomLabel}%</span>
-                    <button type="button" className="toolbar-zoom-btn" onClick={onZoomIn} aria-label="Acercar">+</button>
-                    <button type="button" className="toolbar-zoom-reset" onClick={onZoomReset}>Restablecer</button>
+            {showZoomGroup && (
+                <div className="toolbar-group toolbar-group--zoom">
+                    <span className="toolbar-group__label">Zoom</span>
+                    <div className="toolbar-zoom-control">
+                        <button type="button" className="toolbar-zoom-btn" onClick={onZoomOut} aria-label="Alejar">−</button>
+                        <span className="toolbar-zoom-value">{zoomLabel}%</span>
+                        <button type="button" className="toolbar-zoom-btn" onClick={onZoomIn} aria-label="Acercar">+</button>
+                        <button type="button" className="toolbar-zoom-reset" onClick={onZoomReset}>Restablecer</button>
+                    </div>
                 </div>
-            </div>
+            )}
             <div className="ml-auto flex items-center gap-2 text-sm">
                 <button onClick={() => setShowOptions(true)} className="toolbar-btn toolbar-btn--slate">Opciones</button>
             </div>
@@ -754,6 +1042,10 @@ export default function WROPlaybackPlanner() {
     const [robot, setRobot] = useState({ ...DEFAULT_ROBOT });
     const [robotImgObj, setRobotImgObj] = useState(null);
     const [sections, setSections] = useState([{ id: uid('sec'), name: 'Sección 1', points: [], actions: [], color: DEFAULT_ROBOT.color, isVisible: true }]);
+    const [obstacles, setObstacles] = useState([]);
+    const [obstacleMode, setObstacleMode] = useState(false);
+    const [selectedObstacleId, setSelectedObstacleId] = useState(null);
+    const [obstacleTransform, setObstacleTransform] = useState({ type: 'idle', obstacleId: null, corner: null, offsetX: 0, offsetY: 0, baseRect: null });
     const [selectedSectionId, setSelectedSectionId] = useState(sections[0].id);
     const [expandedSections, setExpandedSections] = useState([sections[0].id]);
     const [initialPose, setInitialPose] = useState({ x: 120, y: 120, theta: 0 });
@@ -771,6 +1063,8 @@ export default function WROPlaybackPlanner() {
         originX: 0,
         originY: 0,
         active: false,
+        hasCollision: false,
+        collisionObstacleIds: [],
     });
     const [dragging, setDragging] = useState({ active: false, sectionId: null, index: -1 });
     const [hoverNode, setHoverNode] = useState({ sectionId: null, index: -1 });
@@ -789,17 +1083,22 @@ export default function WROPlaybackPlanner() {
     const [zoom, setZoom] = useState(1);
     const [canvasBaseSize, setCanvasBaseSize] = useState({ width: 0, height: 0 });
     const [cursorGuide, setCursorGuide] = useState({ x: 0, y: 0, visible: false });
-    const drawSessionRef = useRef({ active: false, lastPoint: null, addedDuringDrag: false });
+    const drawSessionRef = useRef({ active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() });
     const drawThrottleRef = useRef({ lastAutoAddTs: 0 });
     const DRAW_STEP_MIN_PX = 6;
     const DRAW_AUTO_INTERVAL_MS = 340;
+    const COLLISION_ANIMATION_DURATION_MS = 900;
+    const COLLISION_TRIGGER_PROGRESS = 0.25;
 
     const animRef = useRef(0);
-    const actionCursorRef = useRef({ list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1 });
+    const actionCursorRef = useRef({ list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1, moveTotalPx: 0 });
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
     const rightEraseTimerRef = useRef(null);
     const rightPressActiveRef = useRef(false);
+    const collisionPlaybackRef = useRef(new Map());
+    const collisionAnimationRef = useRef({ active: false, timer: 0, obstacleIds: [], pose: null });
+    const lastTickRef = useRef(Date.now());
 
     const currentSection = useMemo(() => sections.find(s => s.id === selectedSectionId) || sections[0], [sections, selectedSectionId]);
 
@@ -813,6 +1112,7 @@ export default function WROPlaybackPlanner() {
     }, []);
 
     const halfRobotLengthPx = useMemo(() => unitToPx(robot.length) / 2, [unitToPx, robot.length]);
+    const halfRobotWidthPx = useMemo(() => unitToPx(robot.width) / 2, [unitToPx, robot.width]);
 
     const getReferencePoint = useCallback((pose, reference) => {
         if (!pose) return { x: 0, y: 0 };
@@ -824,6 +1124,134 @@ export default function WROPlaybackPlanner() {
         }
         return { x: pose.x, y: pose.y };
     }, [halfRobotLengthPx]);
+
+    const activeObstacles = useMemo(
+        () => obstacles.filter(obs => obs && obs.isActive !== false && Number.isFinite(obs.x) && Number.isFinite(obs.y)),
+        [obstacles]
+    );
+
+    const formatObstacleNames = useCallback((ids) => {
+        if (!ids?.length) return '';
+        return ids
+            .map(id => activeObstacles.find(obstacle => obstacle.id === id)?.name ?? '')
+            .map(name => (typeof name === 'string' ? name.trim() : ''))
+            .filter(Boolean)
+            .join(', ');
+    }, [activeObstacles]);
+
+    const getObstacleRectBounds = useCallback((obstacle) => {
+        if (!obstacle) return null;
+        return {
+            left: obstacle.x - obstacle.width / 2,
+            right: obstacle.x + obstacle.width / 2,
+            top: obstacle.y - obstacle.height / 2,
+            bottom: obstacle.y + obstacle.height / 2,
+        };
+    }, []);
+
+    const findObstacleAtPoint = useCallback((point) => {
+        for (let i = obstacles.length - 1; i >= 0; i -= 1) {
+            const obs = obstacles[i];
+            if (!obs || obs.isActive === false) continue;
+            const rect = getObstacleRectBounds(obs);
+            if (!rect) continue;
+            if (point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom) {
+                return obs;
+            }
+        }
+        return null;
+    }, [obstacles, getObstacleRectBounds]);
+
+    const findObstacleHandleAtPoint = useCallback((point) => {
+        if (!selectedObstacleId) return null;
+        const obstacle = obstacles.find(obs => obs.id === selectedObstacleId);
+        if (!obstacle || obstacle.isActive === false) return null;
+        const rect = getObstacleRectBounds(obstacle);
+        if (!rect) return null;
+        const handleHalf = OBSTACLE_HANDLE_SIZE / 2;
+        const handles = [
+            { corner: 'top-left', x: rect.left, y: rect.top },
+            { corner: 'top-right', x: rect.right, y: rect.top },
+            { corner: 'bottom-right', x: rect.right, y: rect.bottom },
+            { corner: 'bottom-left', x: rect.left, y: rect.bottom },
+        ];
+        for (const handle of handles) {
+            if (Math.abs(point.x - handle.x) <= handleHalf && Math.abs(point.y - handle.y) <= handleHalf) {
+                return { obstacleId: obstacle.id, corner: handle.corner, x: handle.x, y: handle.y, rect };
+            }
+        }
+        return null;
+    }, [obstacles, selectedObstacleId, getObstacleRectBounds]);
+
+    const getRobotFootprint = useCallback((pose) => {
+        if (!pose) return [];
+        const cosT = Math.cos(pose.theta);
+        const sinT = Math.sin(pose.theta);
+        const hx = halfRobotLengthPx;
+        const hy = halfRobotWidthPx;
+        return [
+            { x: pose.x + cosT * hx - sinT * hy, y: pose.y + sinT * hx + cosT * hy },
+            { x: pose.x + cosT * hx + sinT * hy, y: pose.y + sinT * hx - cosT * hy },
+            { x: pose.x - cosT * hx + sinT * hy, y: pose.y - sinT * hx - cosT * hy },
+            { x: pose.x - cosT * hx - sinT * hy, y: pose.y - sinT * hx + cosT * hy },
+        ];
+    }, [halfRobotLengthPx, halfRobotWidthPx]);
+
+    const resetObstacleTransform = useCallback(() => {
+        setObstacleTransform({ type: 'idle', obstacleId: null, corner: null, offsetX: 0, offsetY: 0, baseRect: null });
+    }, []);
+
+    const detectSegmentCollisions = useCallback((startPose, endPose) => {
+        if (!startPose || !endPose || !activeObstacles.length) return [];
+        const hits = new Set();
+        const dx = endPose.x - startPose.x;
+        const dy = endPose.y - startPose.y;
+        const distance = Math.hypot(dx, dy);
+        const deltaTheta = normalizeAngle(endPose.theta - startPose.theta);
+        const sampleStepPx = Math.max(halfRobotWidthPx, 12);
+        if (distance < 1e-3) {
+            const steps = Math.max(1, Math.ceil(Math.abs(deltaTheta) / (5 * DEG2RAD)));
+            for (let i = 0; i <= steps; i += 1) {
+                const t = steps === 0 ? 0 : i / steps;
+                const pose = { x: startPose.x, y: startPose.y, theta: normalizeAngle(startPose.theta + deltaTheta * t) };
+                const footprint = getRobotFootprint(pose);
+                for (const obstacle of activeObstacles) {
+                    const rect = toRect(obstacle);
+                    if (polygonIntersectsRect(footprint, rect)) {
+                        hits.add(obstacle.id);
+                    }
+                }
+            }
+            return Array.from(hits);
+        }
+        const steps = Math.max(1, Math.ceil(distance / sampleStepPx));
+        for (let i = 0; i <= steps; i += 1) {
+            const t = steps === 0 ? 0 : i / steps;
+            const pose = {
+                x: startPose.x + dx * t,
+                y: startPose.y + dy * t,
+                theta: normalizeAngle(startPose.theta + deltaTheta * t),
+            };
+            const footprint = getRobotFootprint(pose);
+            for (const obstacle of activeObstacles) {
+                const rect = toRect(obstacle);
+                if (polygonIntersectsRect(footprint, rect)) {
+                    hits.add(obstacle.id);
+                }
+            }
+        }
+        return Array.from(hits);
+    }, [activeObstacles, getRobotFootprint, halfRobotWidthPx, normalizeAngle]);
+
+    const evaluateSegmentCollision = useCallback((startPose, endPose, reference) => {
+        if (!startPose || !endPose) {
+            return { startPoint: null, endPoint: null, collisions: [] };
+        }
+        const startPoint = getReferencePoint(startPose, reference);
+        const endPoint = getReferencePoint(endPose, reference);
+        const collisions = detectSegmentCollisions(startPose, endPose);
+        return { startPoint, endPoint, collisions };
+    }, [detectSegmentCollisions, getReferencePoint]);
 
     const toggleReverseDrawing = useCallback(() => {
         setReverseDrawing(prev => !prev);
@@ -849,6 +1277,37 @@ export default function WROPlaybackPlanner() {
 
     const handleZoomReset = useCallback(() => {
         setZoom(1);
+    }, [setZoom]);
+
+    const addObstacle = useCallback(() => {
+        setObstacleMode(true);
+        setDrawMode(false);
+        setObstacles(prev => {
+            const obstacle = {
+                id: uid('obs'),
+                name: `Obstaculo ${prev.length + 1}`,
+                x: initialPose.x,
+                y: initialPose.y,
+                width: DEFAULT_OBSTACLE_SIZE.width,
+                height: DEFAULT_OBSTACLE_SIZE.height,
+                isActive: true,
+                fillColor: DEFAULT_OBSTACLE_COLOR,
+                opacity: DEFAULT_OBSTACLE_OPACITY,
+            };
+            setSelectedObstacleId(obstacle.id);
+            resetObstacleTransform();
+            return [...prev, obstacle];
+        });
+    }, [initialPose, resetObstacleTransform, setSelectedObstacleId, setObstacleMode, setDrawMode]);
+
+    const updateObstacle = useCallback((id, updates) => {
+        setObstacles(prev => prev.map(obstacle => (obstacle.id === id ? { ...obstacle, ...updates } : obstacle)));
+    }, []);
+
+    const removeObstacle = useCallback((id) => {
+        setObstacles(prev => prev.filter(obstacle => obstacle.id !== id));
+        setSelectedObstacleId(prev => (prev === id ? null : prev));
+        setObstacleTransform(current => (current.obstacleId === id ? { type: 'idle', obstacleId: null, corner: null, offsetX: 0, offsetY: 0, baseRect: null } : current));
     }, []);
 
     useEffect(() => {
@@ -879,12 +1338,30 @@ export default function WROPlaybackPlanner() {
     }, [toggleReverseDrawing]);
 
     useEffect(() => {
-        drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false };
+        drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
     }, [selectedSectionId]);
 
     useEffect(() => {
+        if (obstacleMode) {
+            setDrawMode(false);
+            setHoverNode({ sectionId: null, index: -1 });
+            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
+            setGhost(prev => (prev.active ? { ...prev, active: false, hasCollision: false, collisionObstacleIds: [] } : prev));
+        } else {
+            resetObstacleTransform();
+        }
+    }, [obstacleMode, resetObstacleTransform, setDrawMode, setGhost, setHoverNode]);
+
+    useEffect(() => {
+        if (selectedObstacleId && !obstacles.some(obs => obs.id === selectedObstacleId)) {
+            setSelectedObstacleId(null);
+            resetObstacleTransform();
+        }
+    }, [obstacles, selectedObstacleId, resetObstacleTransform]);
+
+    useEffect(() => {
         if (!drawMode) {
-            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false };
+            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
         }
     }, [drawMode]);
 
@@ -965,7 +1442,14 @@ export default function WROPlaybackPlanner() {
             } else {
                 const distance = Number((-act.distance).toFixed(2));
                 if (Math.abs(distance) > 1e-3) {
-                    reversed.push({ type: 'move', distance, reference: act.reference || 'center' });
+                    const reversedMove = { type: 'move', distance, reference: act.reference || 'center' };
+                    if (Array.isArray(act.collisionObstacleIds) && act.collisionObstacleIds.length) {
+                        reversedMove.collisionObstacleIds = [...act.collisionObstacleIds];
+                    }
+                    if (act.collisionApproved) {
+                        reversedMove.collisionApproved = true;
+                    }
+                    reversed.push(reversedMove);
                 }
             }
         }
@@ -998,7 +1482,12 @@ export default function WROPlaybackPlanner() {
             const cm = pxToUnit(distPx);
             if (cm > 1e-3) {
                 const signed = segmentReverse ? -cm : cm;
-                acts.push({ type: 'move', distance: Number(signed.toFixed(2)), reference: segmentReference });
+                const moveAction = { type: 'move', distance: Number(signed.toFixed(2)), reference: segmentReference };
+                if (Array.isArray(pt.collisionObstacleIds) && pt.collisionObstacleIds.length > 0) {
+                    moveAction.collisionObstacleIds = [...new Set(pt.collisionObstacleIds)];
+                    moveAction.collisionApproved = Boolean(pt.collisionApproved);
+                }
+                acts.push(moveAction);
             }
             prev = { x: pt.x, y: pt.y, theta: targetHeading };
         }
@@ -1027,6 +1516,8 @@ export default function WROPlaybackPlanner() {
                     reverse: a.distance < 0,
                     reference: a.reference || 'center',
                     heading: pose.theta,
+                    collisionObstacleIds: Array.isArray(a.collisionObstacleIds) ? [...a.collisionObstacleIds] : [],
+                    collisionApproved: Boolean(a.collisionApproved),
                 });
             }
         }
@@ -1205,7 +1696,96 @@ export default function WROPlaybackPlanner() {
             for (let y = grid.offsetY - step; y > 0; y -= step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cvs.width, y); ctx.stroke(); }
             ctx.restore();
         }
-        
+
+        const collisionAnim = collisionAnimationRef.current;
+        obstacles.forEach(obstacle => {
+            if (obstacle.isActive === false) return;
+            const halfW = obstacle.width / 2;
+            const halfH = obstacle.height / 2;
+            const animActive = collisionAnim?.active && Array.isArray(collisionAnim.obstacleIds) && collisionAnim.obstacleIds.includes(obstacle.id);
+            const destructionProgress = animActive ? Math.min(1, Math.max(0, 1 - (collisionAnim.timer / COLLISION_ANIMATION_DURATION_MS))) : 0;
+            const fadeFactor = animActive ? Math.max(0, 1 - destructionProgress) : 1;
+            const fillOpacity = (Number.isFinite(obstacle.opacity) ? obstacle.opacity : DEFAULT_OBSTACLE_OPACITY) * fadeFactor;
+            const strokeOpacity = Math.max(0.25, fadeFactor);
+            const fillColor = hexToRgba(obstacle.fillColor || DEFAULT_OBSTACLE_COLOR, fillOpacity);
+            const strokeColor = hexToRgba(obstacle.fillColor || DEFAULT_OBSTACLE_COLOR, strokeOpacity);
+            const isSelected = obstacle.id === selectedObstacleId;
+
+            ctx.save();
+            ctx.translate(obstacle.x, obstacle.y);
+
+            ctx.save();
+            if (animActive) {
+                const burst = 0.15 * Math.sin(destructionProgress * Math.PI);
+                const wobble = destructionProgress * 0.15 * Math.sin(destructionProgress * 8 * Math.PI);
+                ctx.scale(1 + burst, 1 + burst);
+                ctx.rotate(wobble);
+            }
+            ctx.fillStyle = fillColor;
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = isSelected && obstacleMode ? 3 : 2;
+            ctx.beginPath();
+            ctx.rect(-halfW, -halfH, obstacle.width, obstacle.height);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+
+            if (animActive && destructionProgress > 0) {
+                const shardCount = 4;
+                const baseShardSize = Math.max(6, Math.min(obstacle.width, obstacle.height) * 0.25);
+                const travel = Math.max(12, Math.min(obstacle.width, obstacle.height) * 0.6) * destructionProgress;
+                const shardAlpha = Math.max(0, 0.75 - destructionProgress * 0.75);
+                const shardColor = hexToRgba(obstacle.fillColor || DEFAULT_OBSTACLE_COLOR, shardAlpha);
+                for (let i = 0; i < shardCount; i += 1) {
+                    const angle = (Math.PI / 2) * i;
+                    const direction = i % 2 === 0 ? 1 : -1;
+                    ctx.save();
+                    ctx.rotate(angle);
+                    ctx.translate(travel, 0);
+                    ctx.rotate(destructionProgress * Math.PI * 0.6 * direction);
+                    ctx.fillStyle = shardColor;
+                    ctx.fillRect(-baseShardSize / 2, -baseShardSize / 3, baseShardSize, baseShardSize / 1.5);
+                    ctx.restore();
+                }
+
+                ctx.save();
+                ctx.strokeStyle = hexToRgba('#ffffff', Math.max(0, 0.6 - destructionProgress * 0.6));
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(halfW * 0.8, halfH * 0.8);
+                ctx.moveTo(0, 0);
+                ctx.lineTo(-halfW * 0.8, halfH * 0.8);
+                ctx.moveTo(0, 0);
+                ctx.lineTo(halfW * 0.8, -halfH * 0.8);
+                ctx.moveTo(0, 0);
+                ctx.lineTo(-halfW * 0.8, -halfH * 0.8);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            if (isSelected && obstacleMode && fadeFactor > 0.15) {
+                const handleHalf = OBSTACLE_HANDLE_SIZE / 2;
+                const handlePoints = [
+                    { x: -halfW, y: -halfH },
+                    { x: halfW, y: -halfH },
+                    { x: halfW, y: halfH },
+                    { x: -halfW, y: halfH },
+                ];
+                const handleHex = getContrastingHex(obstacle.fillColor || DEFAULT_OBSTACLE_COLOR);
+                ctx.fillStyle = hexToRgba(handleHex, 0.25);
+                ctx.strokeStyle = hexToRgba(handleHex, 0.6);
+                ctx.lineWidth = 1.2;
+                handlePoints.forEach(pt => {
+                    ctx.beginPath();
+                    ctx.rect(pt.x - handleHalf, pt.y - handleHalf, OBSTACLE_HANDLE_SIZE, OBSTACLE_HANDLE_SIZE);
+                    ctx.fill();
+                    ctx.stroke();
+                });
+            }
+
+            ctx.restore();
+        });
         sections.forEach(s => {
             if (s.isVisible === false || !s.points.length) return;
             let pose = computePoseUpToSection(s.id);
@@ -1224,9 +1804,10 @@ export default function WROPlaybackPlanner() {
                 }
                 const endPose = { x: pt.x, y: pt.y, theta: segmentTheta };
                 const endDisplay = getReferencePoint(endPose, reference);
+                const hasCollision = Array.isArray(pt.collisionObstacleIds) && pt.collisionObstacleIds.length > 0;
                 ctx.save();
                 ctx.lineWidth = reference === 'tip' ? 3.5 : 3;
-                ctx.strokeStyle = s.color || '#000';
+                ctx.strokeStyle = hasCollision ? OBSTACLE_RENDER.blockedStroke : (s.color || '#000');
                 ctx.setLineDash(reference === 'tip' ? [12, 8] : []);
                 ctx.beginPath();
                 ctx.moveTo(startDisplay.x, startDisplay.y);
@@ -1241,7 +1822,8 @@ export default function WROPlaybackPlanner() {
                     const isActive = (dragging.active && dragging.sectionId === s.id && dragging.index === i) || (hoverNode.sectionId === s.id && hoverNode.index === i);
                     const radius = isActive ? 6 : 4;
                     ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
-                    ctx.fillStyle = s.color || '#111827';
+                    const pointCollision = Array.isArray(pt.collisionObstacleIds) && pt.collisionObstacleIds.length > 0;
+                    ctx.fillStyle = pointCollision ? OBSTACLE_RENDER.blockedStroke : (s.color || '#111827');
                     ctx.fill();
                     if (pt.reference === 'tip') {
                         ctx.strokeStyle = '#f97316';
@@ -1273,7 +1855,8 @@ export default function WROPlaybackPlanner() {
                 const previewPoint = getReferencePoint(previewPose, reference);
                 ctx.save();
                 ctx.setLineDash(reference === 'tip' ? [10, 6] : [8, 6]);
-                ctx.strokeStyle = reference === 'tip' ? '#fb923c' : (currentSection.color || '#64748b');
+                const ghostStroke = ghost.hasCollision ? OBSTACLE_RENDER.blockedStroke : (reference === 'tip' ? '#fb923c' : (currentSection.color || '#64748b'));
+                ctx.strokeStyle = ghostStroke;
                 ctx.lineWidth = 2;
                 ctx.beginPath();
                 ctx.moveTo(originX, originY);
@@ -1303,7 +1886,29 @@ export default function WROPlaybackPlanner() {
             ctx.restore();
         }
 
-        if (isRunning) { ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(5, 5, 120, 20); ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif'; const { idx, list } = actionCursorRef.current; ctx.fillText(`Acción ${idx + 1}/${list.length}`, 10, 18); ctx.restore(); drawRobot(ctx, playPose, false); }
+        if (isRunning) {
+            ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(5, 5, 120, 20); ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif'; const { idx, list } = actionCursorRef.current; ctx.fillText(`Acci?n ${idx + 1}/${list.length}`, 10, 18); ctx.restore(); drawRobot(ctx, playPose, false);
+            const anim = collisionAnimationRef.current;
+            if (anim.active && anim.pose) {
+                const intensity = Math.max(0, Math.min(1, anim.timer / COLLISION_ANIMATION_DURATION_MS));
+                const baseRadius = unitToPx(robot.length);
+                const pulseRadius = baseRadius * (0.45 + 0.35 * (1 - intensity));
+                ctx.save();
+                ctx.translate(anim.pose.x, anim.pose.y);
+                ctx.globalAlpha = 0.45 + 0.35 * Math.sin((1 - intensity) * Math.PI * 4);
+                ctx.strokeStyle = OBSTACLE_RENDER.blockedStroke;
+                ctx.lineWidth = 5;
+                ctx.beginPath();
+                ctx.arc(0, 0, pulseRadius, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.globalAlpha = 0.22;
+                ctx.fillStyle = OBSTACLE_RENDER.blockedStroke;
+                ctx.beginPath();
+                ctx.arc(0, 0, pulseRadius * 0.6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
 
         if (cursorGuide.visible) {
             ctx.save();
@@ -1321,7 +1926,7 @@ export default function WROPlaybackPlanner() {
             ctx.restore();
         }
         ctx.save(); ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(initialPose.x, initialPose.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-    }, [bgImage, bgOpacity, grid, sections, initialPose, drawMode, ghost, isRunning, playPose, dragging, hoverNode, unitToPx, computePoseUpToSection, drawRobot, currentSection, rulerActive, rulerPoints, pxToUnit, unit, getReferencePoint, getLastPoseOfSection, referenceMode, normalizeAngle, cursorGuide]);
+    }, [bgImage, bgOpacity, grid, obstacles, sections, initialPose, drawMode, ghost, isRunning, playPose, dragging, hoverNode, unitToPx, computePoseUpToSection, drawRobot, currentSection, rulerActive, rulerPoints, pxToUnit, unit, getReferencePoint, getLastPoseOfSection, referenceMode, normalizeAngle, cursorGuide, obstacleMode, selectedObstacleId, robot]);
 
     useEffect(() => { const preset = FIELD_PRESETS.find(p => p.key === fieldKey); if (!preset || !preset.bg) { setBgImage(null); return; } const img = new Image(); img.onload = () => setBgImage(img); img.src = preset.bg; }, [fieldKey]);
     useEffect(() => { if (!robot.imageSrc) { setRobotImgObj(null); return; } const img = new Image(); img.onload = () => setRobotImgObj(img); img.src = robot.imageSrc; }, [robot.imageSrc]);
@@ -1355,6 +1960,62 @@ export default function WROPlaybackPlanner() {
     useEffect(() => { const handleKeyDown = (e) => { if (e.key === 'Escape') { setDrawMode(false); } }; window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, []);
     useEffect(() => { draw(); }, [draw]);
 
+    useEffect(() => {
+        if (!sections.length) return;
+        let poseCursor = { ...initialPose };
+        let changed = false;
+        const recalculated = sections.map(section => {
+            const sectionStartPose = { ...poseCursor };
+            let anchorPose = { ...sectionStartPose };
+            let pointsChanged = false;
+            const updatedPoints = section.points.map(pt => {
+                const nextTheta = typeof pt.heading === 'number' ? pt.heading : anchorPose.theta;
+                const endPose = { x: pt.x, y: pt.y, theta: nextTheta };
+                const { collisions } = evaluateSegmentCollision(anchorPose, endPose, pt.reference || 'center');
+                const normalizedCollisions = collisions.length ? [...new Set(collisions)] : [];
+                const prevCollisions = Array.isArray(pt.collisionObstacleIds) ? pt.collisionObstacleIds : [];
+                const collisionsChanged = !sameIdList(normalizedCollisions, prevCollisions);
+                const approved = normalizedCollisions.length ? (Boolean(pt.collisionApproved) && !collisionsChanged) : false;
+                const shouldUpdate = collisionsChanged || approved !== Boolean(pt.collisionApproved);
+                anchorPose = { x: endPose.x, y: endPose.y, theta: endPose.theta };
+                if (shouldUpdate) {
+                    pointsChanged = true;
+                    return { ...pt, collisionObstacleIds: normalizedCollisions, collisionApproved: approved };
+                }
+                return pt;
+            });
+            const finalPoints = pointsChanged ? updatedPoints : section.points;
+            const newActions = buildActionsFromPolyline(finalPoints, sectionStartPose);
+            const actionsChanged = section.actions.length !== newActions.length || section.actions.some((act, idx) => {
+                const other = newActions[idx];
+                if (!other) return true;
+                const keys = Object.keys({ ...act, ...other });
+                for (const key of keys) {
+                    const valA = act[key];
+                    const valB = other[key];
+                    if (Array.isArray(valA) || Array.isArray(valB)) {
+                        const arrA = Array.isArray(valA) ? valA : [];
+                        const arrB = Array.isArray(valB) ? valB : [];
+                        if (!sameIdList(arrA, arrB)) return true;
+                    } else if (valA !== valB) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+            const finalActions = actionsChanged ? newActions : section.actions;
+            poseCursor = getPoseAfterActions(sectionStartPose, finalActions);
+            if (pointsChanged || actionsChanged) {
+                changed = true;
+                return { ...section, points: finalPoints, actions: finalActions };
+            }
+            return section;
+        });
+        if (changed) {
+            setSections(recalculated);
+        }
+    }, [sections, activeObstacles, initialPose, evaluateSegmentCollision, buildActionsFromPolyline, getPoseAfterActions]);
+
     const canvasPos = (e, applySnapping = true) => {
         const canvasEl = canvasRef.current;
         const rect = canvasEl.getBoundingClientRect();
@@ -1374,6 +2035,53 @@ export default function WROPlaybackPlanner() {
     
     const onCanvasDown = (e) => {
         if (isSettingOrigin) return;
+        if (obstacleMode) {
+            if (e.button !== 0) return;
+            const point = canvasPos(e, false);
+            const handleHit = findObstacleHandleAtPoint(point);
+            if (handleHit) {
+                const rect = handleHit.rect;
+                const opposite = (() => {
+                    switch (handleHit.corner) {
+                        case 'top-left':
+                            return { x: rect.right, y: rect.bottom };
+                        case 'top-right':
+                            return { x: rect.left, y: rect.bottom };
+                        case 'bottom-right':
+                            return { x: rect.left, y: rect.top };
+                        case 'bottom-left':
+                        default:
+                            return { x: rect.right, y: rect.top };
+                    }
+                })();
+                setSelectedObstacleId(handleHit.obstacleId);
+                setObstacleTransform({
+                    type: 'resize',
+                    obstacleId: handleHit.obstacleId,
+                    corner: handleHit.corner,
+                    offsetX: 0,
+                    offsetY: 0,
+                    baseRect: { opposite },
+                });
+                return;
+            }
+            const obstacleHit = findObstacleAtPoint(point);
+            if (obstacleHit) {
+                setSelectedObstacleId(obstacleHit.id);
+                setObstacleTransform({
+                    type: 'pending-drag',
+                    obstacleId: obstacleHit.id,
+                    corner: null,
+                    offsetX: point.x - obstacleHit.x,
+                    offsetY: point.y - obstacleHit.y,
+                    baseRect: { startX: point.x, startY: point.y },
+                });
+                return;
+            }
+            setSelectedObstacleId(null);
+            resetObstacleTransform();
+            return;
+        }
         if (e.button === 2) {
             e.preventDefault();
             if (!drawMode || !currentSection) return;
@@ -1402,6 +2110,7 @@ export default function WROPlaybackPlanner() {
                 active: true,
                 lastPoint: { x: basePose.x, y: basePose.y, heading: basePose.theta },
                 addedDuringDrag: false,
+                approvedCollisionKeys: new Set(),
             };
             drawThrottleRef.current.lastAutoAddTs = 0;
             return;
@@ -1412,12 +2121,70 @@ export default function WROPlaybackPlanner() {
         if (currentSection) { const idx = hitTestNode(currentSection.points, p, 8); if (idx > -1) setDragging({ active: true, sectionId: currentSection.id, index: idx }); }
     };
 
+
     const onCanvasMove = (e) => {
+        if (obstacleMode) {
+            const rawPoint = canvasPos(e, false);
+            setCursorGuide({ x: rawPoint.x, y: rawPoint.y, visible: true });
+            if (obstacleTransform.type === 'pending-drag') {
+                const startX = obstacleTransform.baseRect?.startX ?? rawPoint.x;
+                const startY = obstacleTransform.baseRect?.startY ?? rawPoint.y;
+                const distance = Math.hypot(rawPoint.x - startX, rawPoint.y - startY);
+                if (distance < OBSTACLE_DRAG_THRESHOLD) {
+                    return;
+                }
+                const target = obstacles.find(obs => obs.id === obstacleTransform.obstacleId);
+                if (!target) {
+                    resetObstacleTransform();
+                    return;
+                }
+                const dragTransform = {
+                    type: 'drag',
+                    obstacleId: obstacleTransform.obstacleId,
+                    corner: null,
+                    offsetX: obstacleTransform.offsetX,
+                    offsetY: obstacleTransform.offsetY,
+                    baseRect: null,
+                };
+                setObstacleTransform(dragTransform);
+                const nextX = rawPoint.x - dragTransform.offsetX;
+                const nextY = rawPoint.y - dragTransform.offsetY;
+                setObstacles(prev => prev.map(obs => (obs.id === target.id ? { ...obs, x: nextX, y: nextY } : obs)));
+                return;
+            }
+            if (obstacleTransform.type === 'drag') {
+                const target = obstacles.find(obs => obs.id === obstacleTransform.obstacleId);
+                if (!target) {
+                    resetObstacleTransform();
+                    return;
+                }
+                const nextX = rawPoint.x - obstacleTransform.offsetX;
+                const nextY = rawPoint.y - obstacleTransform.offsetY;
+                setObstacles(prev => prev.map(obs => (obs.id === target.id ? { ...obs, x: nextX, y: nextY } : obs)));
+            } else if (obstacleTransform.type === 'resize') {
+                const target = obstacles.find(obs => obs.id === obstacleTransform.obstacleId);
+                if (!target) {
+                    resetObstacleTransform();
+                    return;
+                }
+                const opposite = obstacleTransform.baseRect?.opposite;
+                if (!opposite) return;
+                const minSize = 10;
+                const px = rawPoint.x;
+                const py = rawPoint.y;
+                const nextWidth = Math.max(minSize, Math.abs(opposite.x - px));
+                const nextHeight = Math.max(minSize, Math.abs(opposite.y - py));
+                const centerX = (opposite.x + px) / 2;
+                const centerY = (opposite.y + py) / 2;
+                setObstacles(prev => prev.map(obs => (obs.id === target.id ? { ...obs, x: centerX, y: centerY, width: nextWidth, height: nextHeight } : obs)));
+            }
+            return;
+        }
         const rawPoint = canvasPos(e, false);
         setCursorGuide({ x: rawPoint.x, y: rawPoint.y, visible: true });
 
         if (!drawMode || !currentSection) {
-            setGhost(prev => (prev.active ? { ...prev, active: false } : prev));
+            setGhost(prev => (prev.active ? { ...prev, active: false, hasCollision: false, collisionObstacleIds: [] } : prev));
         }
 
         if (rulerActive && isDraggingRuler) {
@@ -1440,7 +2207,7 @@ export default function WROPlaybackPlanner() {
             setSections(prev => {
                 const newSections = prev.map(s => {
                     if (s.id !== dragging.sectionId) return s;
-                    const pts = s.points.map((pt, i) => i === dragging.index ? { ...pt, x: p.x, y: p.y } : pt);
+                    const pts = s.points.map((pt, i) => (i === dragging.index ? { ...pt, x: p.x, y: p.y } : pt));
                     return recalcSectionFromPoints({ ...s, points: pts });
                 });
                 return recalcAllFollowingSections(newSections, dragging.sectionId);
@@ -1472,8 +2239,9 @@ export default function WROPlaybackPlanner() {
 
             const projection = projectPointWithReference(p, anchorPose, segmentReference, reverseDrawing);
             const previewPose = { x: projection.center.x, y: projection.center.y, theta: projection.theta };
-            const anchorDisplay = getReferencePoint(anchorPose, segmentReference);
-            const previewDisplay = getReferencePoint(previewPose, segmentReference);
+            const { startPoint: segmentStart, endPoint: segmentEnd, collisions } = evaluateSegmentCollision(anchorPose, previewPose, segmentReference);
+            const fallbackOrigin = segmentStart || getReferencePoint(anchorPose, segmentReference);
+            const previewDisplay = segmentEnd || getReferencePoint(previewPose, segmentReference);
             setGhost({
                 x: previewPose.x,
                 y: previewPose.y,
@@ -1481,9 +2249,11 @@ export default function WROPlaybackPlanner() {
                 reference: segmentReference,
                 displayX: previewDisplay.x,
                 displayY: previewDisplay.y,
-                originX: anchorDisplay.x,
-                originY: anchorDisplay.y,
+                originX: fallbackOrigin.x,
+                originY: fallbackOrigin.y,
                 active: true,
+                hasCollision: collisions.length > 0,
+                collisionObstacleIds: collisions,
             });
 
             if (activeSession) {
@@ -1494,19 +2264,46 @@ export default function WROPlaybackPlanner() {
                     if (now - last < DRAW_AUTO_INTERVAL_MS) {
                         return;
                     }
+                    const collisionIds = collisions.length ? [...new Set(collisions)] : [];
+                    let collisionApproved = false;
+                    if (collisionIds.length) {
+                        const sortedIds = [...collisionIds].sort();
+                        const key = `${segmentReference}:${sortedIds.join('|')}`;
+                        let approvals = drawSessionRef.current.approvedCollisionKeys;
+                        if (!(approvals instanceof Set)) {
+                            approvals = new Set();
+                        }
+                        if (!approvals.has(key)) {
+                            const obstacleNames = formatObstacleNames(sortedIds);
+                            const label = obstacleNames
+                                ? `${sortedIds.length > 1 ? 'los obstáculos' : 'el obstáculo'} ${obstacleNames}`
+                                : (sortedIds.length > 1 ? 'varios obstáculos' : 'un obstáculo');
+                            const message = `El trayecto cruza ${label}. El robot colisionará. ¿Deseas continuar?`;
+                            const shouldContinue = window.confirm(message);
+                            if (!shouldContinue) {
+                                drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
+                                return;
+                            }
+                            approvals.add(key);
+                        }
+                        collisionApproved = true;
+                        drawSessionRef.current.approvedCollisionKeys = approvals;
+                    }
                     const centerPoint = projection.center;
                     setSections(prev => {
                         const updated = prev.map(s => {
                             if (s.id !== currentSection.id) return s;
-                            const newPts = [...s.points, { ...centerPoint, reverse: reverseDrawing, reference: segmentReference, heading: projection.theta }];
+                            const newPts = [...s.points, { ...centerPoint, reverse: reverseDrawing, reference: segmentReference, heading: projection.theta, collisionObstacleIds: collisionIds, collisionApproved }];
                             return recalcSectionFromPoints({ ...s, points: newPts });
                         });
                         return recalcAllFollowingSections(updated, currentSection.id);
                     });
+                    const prevApprovals = drawSessionRef.current.approvedCollisionKeys || new Set();
                     drawSessionRef.current = {
                         active: true,
                         lastPoint: { x: centerPoint.x, y: centerPoint.y, heading: projection.theta },
                         addedDuringDrag: true,
+                        approvedCollisionKeys: new Set(prevApprovals),
                     };
                     drawThrottleRef.current.lastAutoAddTs = now;
                 }
@@ -1515,6 +2312,11 @@ export default function WROPlaybackPlanner() {
     };
 
     const onCanvasUp = () => {
+        if (obstacleMode) {
+            rightPressActiveRef.current = false;
+            resetObstacleTransform();
+            return;
+        }
         rightPressActiveRef.current = false;
         if (rightEraseTimerRef.current) {
             clearInterval(rightEraseTimerRef.current);
@@ -1527,10 +2329,10 @@ export default function WROPlaybackPlanner() {
         setDraggingStart(false);
         setDragging({ active: false, sectionId: null, index: -1 });
         if (drawSessionRef.current.active) {
-            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: drawSessionRef.current.addedDuringDrag };
+            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: drawSessionRef.current.addedDuringDrag, approvedCollisionKeys: new Set() };
         }
         drawThrottleRef.current.lastAutoAddTs = 0;
-        setGhost(prev => (prev.active ? { ...prev, active: false } : prev));
+        setGhost(prev => (prev.active ? { ...prev, active: false, hasCollision: false, collisionObstacleIds: [] } : prev));
     };
 
     const onCanvasLeave = () => {
@@ -1539,6 +2341,7 @@ export default function WROPlaybackPlanner() {
     };
 
     const onCanvasClick = (e) => {
+        if (obstacleMode) return;
         if (isSettingOrigin) {
             const p = canvasPos(e, false);
             setGrid(g => ({ ...g, offsetX: p.x, offsetY: p.y }));
@@ -1548,7 +2351,7 @@ export default function WROPlaybackPlanner() {
         if (rulerActive) return;
         if (!drawMode || !currentSection) return;
         if (drawSessionRef.current.addedDuringDrag) {
-            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false };
+            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
             return;
         }
         const rawPoint = canvasPos(e, false);
@@ -1558,16 +2361,42 @@ export default function WROPlaybackPlanner() {
             : computePoseUpToSection(currentSection.id);
         const segmentReference = referenceMode;
         const projection = projectPointWithReference(p, basePose, segmentReference, reverseDrawing); // apunta la punta al mouse y convierte al centro
+        const previewPose = { x: projection.center.x, y: projection.center.y, theta: projection.theta };
+        const { collisions } = evaluateSegmentCollision(basePose, previewPose, segmentReference);
+        let collisionApproved = false;
+        const collisionIds = collisions.length ? [...new Set(collisions)] : [];
+        if (collisionIds.length) {
+            const sortedIds = [...collisionIds].sort();
+            const key = `${segmentReference}:${sortedIds.join('|')}`;
+            let approvals = drawSessionRef.current.approvedCollisionKeys;
+            if (!(approvals instanceof Set)) {
+                approvals = new Set();
+            }
+            if (!approvals.has(key)) {
+                const obstacleNames = formatObstacleNames(sortedIds);
+                const label = obstacleNames
+                    ? `${sortedIds.length > 1 ? 'los obstáculos' : 'el obstáculo'} ${obstacleNames}`
+                    : (sortedIds.length > 1 ? 'varios obstáculos' : 'un obstáculo');
+                const message = `El trayecto cruza ${label}. El robot colisionará. ¿Deseas continuar?`;
+                const shouldContinue = window.confirm(message);
+                if (!shouldContinue) {
+                    return;
+                }
+                approvals.add(key);
+            }
+            collisionApproved = true;
+            drawSessionRef.current.approvedCollisionKeys = approvals;
+        }
         const centerPoint = projection.center;
         setSections(prev => {
             const updated = prev.map(s => {
                 if (s.id !== currentSection.id) return s;
-                const newPts = [...s.points, { ...centerPoint, reverse: reverseDrawing, reference: segmentReference, heading: projection.theta }];
+                const newPts = [...s.points, { ...centerPoint, reverse: reverseDrawing, reference: segmentReference, heading: projection.theta, collisionObstacleIds: collisionIds, collisionApproved }];
                 return recalcSectionFromPoints({ ...s, points: newPts });
             });
             return recalcAllFollowingSections(updated, currentSection.id);
         });
-        drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false };
+        drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
         drawThrottleRef.current.lastAutoAddTs = Date.now();
     };
 
@@ -1579,11 +2408,24 @@ export default function WROPlaybackPlanner() {
         cancelAnimationFrame(animRef.current);
         setIsRunning(false);
         setIsPaused(false);
-        actionCursorRef.current = { list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1 };
+        actionCursorRef.current = { list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1, moveTotalPx: 0 };
+        collisionPlaybackRef.current = new Map();
+        lastTickRef.current = Date.now();
+        collisionAnimationRef.current = { active: false, timer: 0, obstacleIds: [], pose: null };
         setPlayPose({ ...initialPose });
     }, [initialPose]);
     const tick = useCallback(() => {
-        if (isPaused) { animRef.current = requestAnimationFrame(tick); return; }
+        if (isPaused) { lastTickRef.current = Date.now(); animRef.current = requestAnimationFrame(tick); return; }
+        const nowTs = Date.now();
+        const deltaMs = nowTs - lastTickRef.current;
+        lastTickRef.current = nowTs;
+        const currentAnim = collisionAnimationRef.current;
+        if (currentAnim.active) {
+            currentAnim.timer -= deltaMs;
+            if (currentAnim.timer <= 0) {
+                collisionAnimationRef.current = { active: false, timer: 0, obstacleIds: [], pose: null };
+            }
+        }
         const ac = actionCursorRef.current;
         if (ac.idx >= ac.list.length) { stopPlayback(); return; }
         const a = ac.list[ac.idx];
@@ -1613,12 +2455,14 @@ export default function WROPlaybackPlanner() {
                 if (ac.phase !== 'move') {
                     ac.phase = 'move';
                     ac.remainingPx = unitToPx(Math.abs(a.distance));
+                    ac.moveTotalPx = ac.remainingPx;
                     ac.moveDirection = Math.sign(a.distance) || 1;
                 }
                 const remainingPx = ac.remainingPx ?? 0;
                 if (remainingPx < 1e-3) {
                     ac.phase = 'idle';
                     ac.idx++;
+                    ac.moveTotalPx = 0;
                     return pose;
                 }
                 const step = Math.min(speedPx, remainingPx);
@@ -1626,9 +2470,29 @@ export default function WROPlaybackPlanner() {
                 pose.x += Math.cos(pose.theta) * step * direction;
                 pose.y += Math.sin(pose.theta) * step * direction;
                 ac.remainingPx = remainingPx - step;
+                const totalPx = ac.moveTotalPx || (ac.remainingPx + step);
+                if (totalPx > 0) {
+                    const traveledPx = totalPx - ac.remainingPx;
+                    const progress = traveledPx / totalPx;
+                    const event = collisionPlaybackRef.current.get(ac.idx);
+                    if (event && Array.isArray(event.obstacleIds) && event.obstacleIds.length) {
+                        if (!event.triggered && progress >= COLLISION_TRIGGER_PROGRESS) {
+                            collisionAnimationRef.current = {
+                                active: true,
+                                timer: COLLISION_ANIMATION_DURATION_MS,
+                                obstacleIds: event.obstacleIds,
+                                pose: { ...pose },
+                            };
+                            event.triggered = true;
+                        } else if (event.triggered && collisionAnimationRef.current.active) {
+                            collisionAnimationRef.current.pose = { ...pose };
+                        }
+                    }
+                }
                 if ((ac.remainingPx ?? 0) < 1e-3) {
                     ac.phase = 'idle';
                     ac.idx++;
+                    ac.moveTotalPx = 0;
                 }
             }
             return pose;
@@ -1640,7 +2504,16 @@ export default function WROPlaybackPlanner() {
         cancelAnimationFrame(animRef.current);
         setIsRunning(true);
         setIsPaused(false);
-        actionCursorRef.current = { list: [...list], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1 };
+        const collisionMap = new Map();
+        list.forEach((action, index) => {
+            if (action.type === 'move' && action.collisionApproved && Array.isArray(action.collisionObstacleIds) && action.collisionObstacleIds.length) {
+                collisionMap.set(index, { obstacleIds: [...new Set(action.collisionObstacleIds)], triggered: false });
+            }
+        });
+        collisionPlaybackRef.current = collisionMap;
+        collisionAnimationRef.current = { active: false, timer: 0, obstacleIds: [], pose: null };
+        lastTickRef.current = Date.now();
+        actionCursorRef.current = { list: [...list], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1, moveTotalPx: 0 };
         setPlayPose({ ...startPose });
         animRef.current = requestAnimationFrame(tick);
     }, [tick]);
@@ -1692,16 +2565,16 @@ export default function WROPlaybackPlanner() {
     const toggleSectionVisibility = (id) => { setSections(secs => secs.map(s => s.id === id ? { ...s, isVisible: !s.isVisible } : s)); };
     const handleBgUpload = (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { const img = new Image(); img.onload = () => setBgImage(img); img.src = r.result; }; r.readAsDataURL(f); };
     const handleRobotImageUpload = (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => setRobot(rbt => ({ ...rbt, imageSrc: r.result })); r.readAsDataURL(f); };
-    const exportMission = () => { const payload = { fieldKey, grid: { ...grid, cellSize: grid.cellSize }, robot: { ...robot, imageSrc: null }, initialPose, sections, bgOpacity }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `wro_mission_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`; a.click(); URL.revokeObjectURL(url); };
-    const importMission = (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { const data = JSON.parse(r.result); if (Array.isArray(data.sections)) setSections(data.sections.map(s => ({...s, isVisible: s.isVisible !== false}))); if (data.initialPose) setInitialPose(data.initialPose); if (data.robot) setRobot(prev => ({ ...prev, ...data.robot })); if (data.grid) setGrid(prev => ({ ...prev, ...data.grid })); if (data.fieldKey) setFieldKey(data.fieldKey); if (typeof data.bgOpacity === 'number') setBgOpacity(data.bgOpacity); } catch (err) { console.error('Invalid mission file', err); alert('No se pudo importar: archivo inválido'); } }; r.readAsText(f); };
-    
-    return (
+    const exportMission = () => { const payload = { fieldKey, grid: { ...grid, cellSize: grid.cellSize }, robot: { ...robot, imageSrc: null }, initialPose, sections, obstacles, bgOpacity }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `wro_mission_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`; a.click(); URL.revokeObjectURL(url); };
+    const importMission = (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { const data = JSON.parse(r.result); if (Array.isArray(data.sections)) setSections(data.sections.map(s => ({...s, isVisible: s.isVisible !== false}))); if (Array.isArray(data.obstacles)) setObstacles(data.obstacles.map(obs => ({ id: obs.id || uid('obs'), name: obs.name || 'Obstaculo', x: (() => { const n = Number(obs.x); return Number.isFinite(n) ? n : 0; })(), y: (() => { const n = Number(obs.y); return Number.isFinite(n) ? n : 0; })(), width: (() => { const n = Number(obs.width); return Number.isFinite(n) ? n : DEFAULT_OBSTACLE_SIZE.width; })(), height: (() => { const n = Number(obs.height); return Number.isFinite(n) ? n : DEFAULT_OBSTACLE_SIZE.height; })(), isActive: obs.isActive !== false, fillColor: typeof obs.fillColor === 'string' && obs.fillColor.trim() ? obs.fillColor : DEFAULT_OBSTACLE_COLOR, opacity: (() => { const val = Number(obs.opacity); return Number.isFinite(val) ? Math.min(1, Math.max(0, val)) : DEFAULT_OBSTACLE_OPACITY; })() }))); if (data.initialPose) setInitialPose(data.initialPose); if (data.robot) setRobot(prev => ({ ...prev, ...data.robot })); if (data.grid) setGrid(prev => ({ ...prev, ...data.grid })); if (data.fieldKey) setFieldKey(data.fieldKey); if (typeof data.bgOpacity === 'number') setBgOpacity(data.bgOpacity); } catch (err) { console.error('Invalid mission file', err); alert('No se pudo importar: archivo inválido'); } }; r.readAsText(f); };return (
         <div className="w-full h-full min-h-screen">
             <main className="app-shell">
                 <Toolbar
                     {...{
                         drawMode,
                         setDrawMode,
+                        obstacleMode,
+                        setObstacleMode,
                         snap45,
                         setSnap45,
                         snapGrid,
@@ -1725,14 +2598,15 @@ export default function WROPlaybackPlanner() {
                         onZoomIn: handleZoomIn,
                         onZoomOut: handleZoomOut,
                         onZoomReset: handleZoomReset,
+                        showZoomGroup: false,
                     }}
                 />
-
                 <div className="main-grid">
                     {/* PANEL IZQUIERDO (card) */}
                     <aside className="left-panel">
                         <div className="sections-list">
                             <SectionsPanel {...{ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed: isSectionsPanelCollapsed, setIsCollapsed: setIsSectionsPanelCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, unit }} />
+                            <ObstaclesPanel {...{ obstacles, addObstacle, updateObstacle, removeObstacle }} />
                         </div>
                     </aside>
 
@@ -1750,6 +2624,17 @@ export default function WROPlaybackPlanner() {
                                 className={`canvas-surface ${isSettingOrigin ? 'cursor-copy' : 'cursor-crosshair'}`}
                             />
                         </div>
+                        <div className="canvas-zoom-controls toolbar-card mt-4">
+                            <div className="toolbar-group toolbar-group--zoom">
+                                <span className="toolbar-group__label">Zoom</span>
+                                <div className="toolbar-zoom-control">
+                                    <button type="button" className="toolbar-zoom-btn" onClick={handleZoomOut} aria-label="Alejar">−</button>
+                                    <span className="toolbar-zoom-value">{Math.round(zoom * 100)}%</span>
+                                    <button type="button" className="toolbar-zoom-btn" onClick={handleZoomIn} aria-label="Acercar">+</button>
+                                    <button type="button" className="toolbar-zoom-reset" onClick={handleZoomReset}>Restablecer</button>
+                                </div>
+                            </div>
+                        </div>
                         <div className="canvas-legend" aria-hidden="true">
                             <div className="canvas-legend__item">
                                 <span className="canvas-legend__swatch canvas-legend__swatch--center" />
@@ -1762,6 +2647,7 @@ export default function WROPlaybackPlanner() {
                         </div>
                     </section>
                 </div>
+
             </main>
 
             <OptionsPanel {...{ showOptions, setShowOptions, fieldKey, setFieldKey, bgOpacity, setBgOpacity, grid, setGrid, robot, setRobot, initialPose, setInitialPose, handleBgUpload, handleRobotImageUpload, setIsSettingOrigin, unit, setUnit }} />
