@@ -4,11 +4,9 @@ import elementaryFieldImg from "./assets/WRO-2025-GameMat-Elementary2025.jpg";
 import doubleTennisFieldImg from "./assets/WRO-2025_RoboSports_Double-Tennis_Playfield.jpg";
 
 
-// WRO Mission Planner – Reproducción (v18 - Snap 15° corregido)
-// - Corregido: el botón "Snap 15°" ahora también constriñe la POSICIÓN del punto dibujado,
-//   no solo el ángulo calculado para la acción. Antes, el fantasma mostraba la línea a 15°
-//   pero al hacer click se guardaban las coordenadas crudas del ratón. Ahora se proyecta el
-//   punto sobre el rayo a múltiplos de 15° desde el último punto, manteniendo la distancia.
+// WRO Mission Planner – Reproducción (v19 - Snap 45°)
+// - Actualizado: el botón "Snap 45°" bloquea la dirección del siguiente segmento al múltiplo
+//   de 45° más cercano (0°, 45°, 90°, ...), proyectando el punto sobre dicho eje.
 // - Sin cambios en la lógica de snap a cuadrícula ni en el modo regla.
 
 /** @typedef {{x:number, y:number}} Vec2 */
@@ -30,6 +28,7 @@ const FIELD_PRESETS = [
 const DEFAULT_GRID = { cellSize: 1, pixelsPerUnit: 5, lineAlpha: 0.35, offsetX: 0, offsetY: 0 };
 const DEFAULT_ROBOT = { width: 18, length: 20, color: "#0ea5e9", imageSrc: null, opacity: 1 };
 const ZOOM_LIMITS = { min: 0.5, max: 2, step: 0.25 };
+const SNAP_45_BASE_ANGLES = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
 
 const IconChevronLeft = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>;
 const IconChevronRight = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>;
@@ -504,8 +503,8 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
 const Toolbar = ({
     drawMode,
     setDrawMode,
-    snapAngles,
-    setSnapAngles,
+    snap45,
+    setSnap45,
     snapGrid,
     setSnapGrid,
     isRunning,
@@ -637,14 +636,11 @@ const Toolbar = ({
     const handleSnapGridToggle = () => {
         const isTurningOn = !snapGrid;
         setSnapGrid(isTurningOn);
-        if (isTurningOn) setSnapAngles(false);
     };
 
-    const handleSnapAnglesToggle = () => {
-        const isTurningOn = !snapAngles;
-        setSnapAngles(isTurningOn);
-        if (isTurningOn) setSnapGrid(false);
-    };
+    const handleSnap45Toggle = useCallback(() => {
+        setSnap45(prev => !prev);
+    }, [setSnap45]);
 
     const zoomLabel = Math.round(zoom * 100);
 
@@ -687,7 +683,13 @@ const Toolbar = ({
             <button onClick={handleRulerToggle} className={`toolbar-btn ${rulerActive ? 'toolbar-btn--rose' : 'toolbar-btn--muted'}`}>
                 <IconRuler /> Regla
             </button>
-            <button onClick={handleSnapAnglesToggle} className={`toolbar-btn ${snapAngles ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}>Snap 15°</button>
+            <button
+                onClick={handleSnap45Toggle}
+                className={`toolbar-btn ${snap45 ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}
+                title="Bloquea la dirección en múltiplos de 45°"
+            >
+                Snap 45°
+            </button>
             <button onClick={handleSnapGridToggle} className={`toolbar-btn ${snapGrid ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}>Snap Grid</button>
             <div className="toolbar-divider" />
             <button
@@ -758,7 +760,7 @@ export default function WROPlaybackPlanner() {
     const [playPose, setPlayPose] = useState({ ...initialPose });
     const [drawMode, setDrawMode] = useState(true);
     const [snapGrid, setSnapGrid] = useState(true);
-    const [snapAngles, setSnapAngles] = useState(false);
+    const [snap45, setSnap45] = useState(false);
     const [ghost, setGhost] = useState({
         x: 0,
         y: 0,
@@ -768,6 +770,7 @@ export default function WROPlaybackPlanner() {
         displayY: 0,
         originX: 0,
         originY: 0,
+        active: false,
     });
     const [dragging, setDragging] = useState({ active: false, sectionId: null, index: -1 });
     const [hoverNode, setHoverNode] = useState({ sectionId: null, index: -1 });
@@ -785,13 +788,18 @@ export default function WROPlaybackPlanner() {
     const [referenceMode, setReferenceMode] = useState('center');
     const [zoom, setZoom] = useState(1);
     const [canvasBaseSize, setCanvasBaseSize] = useState({ width: 0, height: 0 });
+    const [cursorGuide, setCursorGuide] = useState({ x: 0, y: 0, visible: false });
     const drawSessionRef = useRef({ active: false, lastPoint: null, addedDuringDrag: false });
+    const drawThrottleRef = useRef({ lastAutoAddTs: 0 });
     const DRAW_STEP_MIN_PX = 6;
+    const DRAW_AUTO_INTERVAL_MS = 340;
 
     const animRef = useRef(0);
     const actionCursorRef = useRef({ list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1 });
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
+    const rightEraseTimerRef = useRef(null);
+    const rightPressActiveRef = useRef(false);
 
     const currentSection = useMemo(() => sections.find(s => s.id === selectedSectionId) || sections[0], [sections, selectedSectionId]);
 
@@ -841,6 +849,16 @@ export default function WROPlaybackPlanner() {
 
     const handleZoomReset = useCallback(() => {
         setZoom(1);
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (rightEraseTimerRef.current) {
+                clearInterval(rightEraseTimerRef.current);
+                rightEraseTimerRef.current = null;
+            }
+            rightPressActiveRef.current = false;
+        };
     }, []);
 
     useEffect(() => {
@@ -899,7 +917,7 @@ export default function WROPlaybackPlanner() {
         return pose;
     }, [sections, initialPose, unitToPx, normalizeAngle]);
 
-    const computePoseAfterActions = useCallback((startPose, actions) => {
+    const getPoseAfterActions = useCallback((startPose, actions) => {
         let pose = { ...startPose };
         for (const act of actions) {
             if (act.type === 'rotate') {
@@ -968,12 +986,11 @@ export default function WROPlaybackPlanner() {
             const segmentReverse = Boolean(pt.reverse);
             const segmentReference = pt.reference || 'center';
             const headingToPoint = Math.atan2(dy, dx);
-            let targetHeading = normalizeAngle(headingToPoint + (segmentReverse ? Math.PI : 0));
-            let ang = normalizeAngle(targetHeading - prev.theta);
-            if (snapAngles) {
-                ang = Math.round(ang / (15 * DEG2RAD)) * 15 * DEG2RAD;
-                targetHeading = normalizeAngle(prev.theta + ang);
-            }
+            const storedHeading = typeof pt.heading === 'number'
+                ? normalizeAngle(pt.heading)
+                : normalizeAngle(headingToPoint + (segmentReverse ? Math.PI : 0));
+            const targetHeading = storedHeading;
+            const ang = normalizeAngle(targetHeading - prev.theta);
             const deg = ang * RAD2DEG;
             if (Math.abs(deg) > 1e-3) {
                 acts.push({ type: 'rotate', angle: Number(deg.toFixed(2)) });
@@ -986,7 +1003,7 @@ export default function WROPlaybackPlanner() {
             prev = { x: pt.x, y: pt.y, theta: targetHeading };
         }
         return acts;
-    }, [snapAngles, pxToUnit, normalizeAngle]);
+    }, [pxToUnit, normalizeAngle]);
 
     const pointsFromActions = useCallback((actions, startPose) => {
         const pts = [];
@@ -1060,23 +1077,84 @@ export default function WROPlaybackPlanner() {
         const start = computePoseUpToSection(section.id); const acts = buildActionsFromPolyline(section.points, start); return { ...section, actions: acts };
     }, [computePoseUpToSection, buildActionsFromPolyline]);
 
-    // ---- NUEVO: util para snap angular que también ajusta la POSICIÓN ----
-    const snapAngleTo = useCallback((angleRad, stepDeg = 15) => {
-        const step = stepDeg * DEG2RAD;
-        return Math.round(angleRad / step) * step;
-    }, []);
+    const removeLastPointFromCurrentSection = useCallback(() => {
+        if (!currentSection) return;
+        setSections(prev => {
+            let changed = false;
+            const updated = prev.map(s => {
+                if (s.id !== currentSection.id) return s;
+                if (!s.points.length) return s;
+                changed = true;
+                const newPts = s.points.slice(0, -1);
+                return recalcSectionFromPoints({ ...s, points: newPts });
+            });
+            if (!changed) return prev;
+            return recalcAllFollowingSections(updated, currentSection.id);
+        });
+    }, [currentSection, recalcAllFollowingSections, recalcSectionFromPoints, setSections]);
 
-    const snapPointByAngle = useCallback((rawPoint, lastPoint, reverse = false) => {
-        const dx = rawPoint.x - lastPoint.x;
-        const dy = rawPoint.y - lastPoint.y;
-        const r = Math.hypot(dx, dy);
-        const thetaRaw = Math.atan2(dy, dx);
-        const theta = snapAngles ? snapAngleTo(thetaRaw, 15) : thetaRaw;
-        // Mantiene la misma distancia del mouse pero forzando la dirección a múltiplos de 15°
-        const snappedPoint = { x: lastPoint.x + r * Math.cos(theta), y: lastPoint.y + r * Math.sin(theta) };
-        const orientation = reverse ? normalizeAngle(theta + Math.PI) : theta;
-        return { p: snappedPoint, theta: orientation };
-    }, [snapAngles, snapAngleTo, normalizeAngle]);
+    const projectPointWithReference = useCallback((rawPoint, anchorPose, reference, reverse = false) => {
+        const anchorRefPoint = reference === 'tip'
+            ? getReferencePoint(anchorPose, 'tip')
+            : { x: anchorPose.x, y: anchorPose.y };
+
+        const dx = rawPoint.x - anchorRefPoint.x;
+        const dy = rawPoint.y - anchorRefPoint.y;
+        let distanceRef = Math.hypot(dx, dy);
+        if (distanceRef < 1e-6) {
+            const thetaIdle = reverse ? normalizeAngle(anchorPose.theta + Math.PI) : anchorPose.theta;
+            return {
+                center: { x: anchorPose.x, y: anchorPose.y },
+                theta: thetaIdle,
+                distanceCenter: 0,
+                referenceDistance: 0,
+            };
+        }
+
+        let travelTheta = Math.atan2(dy, dx);
+        if (snap45) {
+            let bestMatch = null;
+            for (const baseAngle of SNAP_45_BASE_ANGLES) {
+                const ux = Math.cos(baseAngle);
+                const uy = Math.sin(baseAngle);
+                const projection = dx * ux + dy * uy;
+                const projX = anchorRefPoint.x + ux * projection;
+                const projY = anchorRefPoint.y + uy * projection;
+                const error = Math.hypot(projX - rawPoint.x, projY - rawPoint.y);
+                const thetaCandidate = projection >= 0 ? baseAngle : normalizeAngle(baseAngle + Math.PI);
+                const distanceCandidate = Math.abs(projection);
+                if (!bestMatch || error < bestMatch.error) {
+                    bestMatch = { theta: thetaCandidate, distance: distanceCandidate, error };
+                }
+            }
+            if (bestMatch) {
+                travelTheta = bestMatch.theta;
+                distanceRef = bestMatch.distance;
+            }
+        }
+
+        const facingTheta = reverse ? normalizeAngle(travelTheta + Math.PI) : normalizeAngle(travelTheta);
+        let centerX;
+        let centerY;
+        if (reference === 'tip') {
+            const finalTipX = anchorRefPoint.x + Math.cos(travelTheta) * distanceRef;
+            const finalTipY = anchorRefPoint.y + Math.sin(travelTheta) * distanceRef;
+            centerX = finalTipX - Math.cos(facingTheta) * halfRobotLengthPx;
+            centerY = finalTipY - Math.sin(facingTheta) * halfRobotLengthPx;
+        } else {
+            centerX = anchorPose.x + Math.cos(travelTheta) * distanceRef;
+            centerY = anchorPose.y + Math.sin(travelTheta) * distanceRef;
+        }
+
+        const distanceCenter = Math.hypot(centerX - anchorPose.x, centerY - anchorPose.y);
+
+        return {
+            center: { x: centerX, y: centerY },
+            theta: facingTheta,
+            distanceCenter,
+            referenceDistance: distanceRef,
+        };
+    }, [getReferencePoint, halfRobotLengthPx, normalizeAngle, snap45]);
 
     const drawRobot = useCallback((ctx, pose, isGhost = false) => {
         ctx.save(); ctx.translate(pose.x, pose.y); ctx.rotate(pose.theta);
@@ -1183,24 +1261,26 @@ export default function WROPlaybackPlanner() {
                 else { finalPose.x += Math.cos(finalPose.theta) * unitToPx(act.distance); finalPose.y += Math.sin(finalPose.theta) * unitToPx(act.distance); }
             }
             drawRobot(ctx, finalPose, false);
-            if (drawMode) {
+            if (drawMode && ghost.active) {
                 const anchorPose = currentSection.points.length > 0
                     ? getLastPoseOfSection(currentSection)
                     : computePoseUpToSection(currentSection.id);
-                const fallbackOrigin = getReferencePoint(anchorPose, ghost.reference || referenceMode);
+                const reference = ghost.reference || referenceMode;
+                const fallbackOrigin = getReferencePoint(anchorPose, reference);
                 const originX = Number.isFinite(ghost.originX) ? ghost.originX : fallbackOrigin.x;
                 const originY = Number.isFinite(ghost.originY) ? ghost.originY : fallbackOrigin.y;
                 const previewPose = { x: ghost.x, y: ghost.y, theta: ghost.theta };
-                const previewPoint = getReferencePoint(previewPose, ghost.reference || referenceMode);
+                const previewPoint = getReferencePoint(previewPose, reference);
                 ctx.save();
-                ctx.setLineDash(ghost.reference === 'tip' ? [10, 6] : [8, 6]);
-                ctx.strokeStyle = ghost.reference === 'tip' ? '#fb923c' : (currentSection.color || '#64748b');
+                ctx.setLineDash(reference === 'tip' ? [10, 6] : [8, 6]);
+                ctx.strokeStyle = reference === 'tip' ? '#fb923c' : (currentSection.color || '#64748b');
                 ctx.lineWidth = 2;
                 ctx.beginPath();
                 ctx.moveTo(originX, originY);
                 ctx.lineTo(previewPoint.x, previewPoint.y);
                 ctx.stroke();
                 ctx.restore();
+                drawRobot(ctx, previewPose, true);
             }
         }
 
@@ -1224,8 +1304,24 @@ export default function WROPlaybackPlanner() {
         }
 
         if (isRunning) { ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(5, 5, 120, 20); ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif'; const { idx, list } = actionCursorRef.current; ctx.fillText(`Acción ${idx + 1}/${list.length}`, 10, 18); ctx.restore(); drawRobot(ctx, playPose, false); }
+
+        if (cursorGuide.visible) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(100, 116, 139, 0.45)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([6, 6]);
+            ctx.beginPath();
+            ctx.moveTo(cursorGuide.x, 0);
+            ctx.lineTo(cursorGuide.x, cvs.height);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, cursorGuide.y);
+            ctx.lineTo(cvs.width, cursorGuide.y);
+            ctx.stroke();
+            ctx.restore();
+        }
         ctx.save(); ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(initialPose.x, initialPose.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-    }, [bgImage, bgOpacity, grid, sections, initialPose, drawMode, ghost, isRunning, playPose, dragging, hoverNode, unitToPx, computePoseUpToSection, drawRobot, currentSection, rulerActive, rulerPoints, pxToUnit, unit, getReferencePoint, getLastPoseOfSection, referenceMode, normalizeAngle]);
+    }, [bgImage, bgOpacity, grid, sections, initialPose, drawMode, ghost, isRunning, playPose, dragging, hoverNode, unitToPx, computePoseUpToSection, drawRobot, currentSection, rulerActive, rulerPoints, pxToUnit, unit, getReferencePoint, getLastPoseOfSection, referenceMode, normalizeAngle, cursorGuide]);
 
     useEffect(() => { const preset = FIELD_PRESETS.find(p => p.key === fieldKey); if (!preset || !preset.bg) { setBgImage(null); return; } const img = new Image(); img.onload = () => setBgImage(img); img.src = preset.bg; }, [fieldKey]);
     useEffect(() => { if (!robot.imageSrc) { setRobotImgObj(null); return; } const img = new Image(); img.onload = () => setRobotImgObj(img); img.src = robot.imageSrc; }, [robot.imageSrc]);
@@ -1278,12 +1374,26 @@ export default function WROPlaybackPlanner() {
     
     const onCanvasDown = (e) => {
         if (isSettingOrigin) return;
+        if (e.button === 2) {
+            e.preventDefault();
+            if (!drawMode || !currentSection) return;
+            rightPressActiveRef.current = true;
+            removeLastPointFromCurrentSection();
+            clearInterval(rightEraseTimerRef.current);
+            rightEraseTimerRef.current = window.setInterval(() => {
+                if (rightPressActiveRef.current) {
+                    removeLastPointFromCurrentSection();
+                }
+            }, 120);
+            return;
+        }
         if (rulerActive) {
             const p = canvasPos(e, false);
             setRulerPoints({ start: p, end: p });
             setIsDraggingRuler(true);
             return;
         }
+        if (e.button !== 0) return;
         if (drawMode && currentSection) {
             const basePose = currentSection.points.length
                 ? getLastPoseOfSection(currentSection)
@@ -1293,6 +1403,7 @@ export default function WROPlaybackPlanner() {
                 lastPoint: { x: basePose.x, y: basePose.y, heading: basePose.theta },
                 addedDuringDrag: false,
             };
+            drawThrottleRef.current.lastAutoAddTs = 0;
             return;
         }
         if (drawMode) return;
@@ -1302,15 +1413,47 @@ export default function WROPlaybackPlanner() {
     };
 
     const onCanvasMove = (e) => {
+        const rawPoint = canvasPos(e, false);
+        setCursorGuide({ x: rawPoint.x, y: rawPoint.y, visible: true });
+
+        if (!drawMode || !currentSection) {
+            setGhost(prev => (prev.active ? { ...prev, active: false } : prev));
+        }
+
         if (rulerActive && isDraggingRuler) {
-            const p = canvasPos(e, false);
-            setRulerPoints(prev => ({ ...prev, end: p }));
+            setRulerPoints(prev => ({ ...prev, end: rawPoint }));
             return;
         }
-        const p = canvasPos(e);
-        if (draggingStart) { setInitialPose(prev => ({ ...prev, x: p.x, y: p.y })); setSections(prev => { const newSections = prev.map(sec => recalcSectionFromPoints(sec)); return recalcAllFollowingSections(newSections, prev[0].id); }); return; }
-        if (dragging.active) { setSections(prev => { const newSections = prev.map(s => { if (s.id !== dragging.sectionId) return s; const pts = s.points.map((pt, i) => i === dragging.index ? { ...pt, x: p.x, y: p.y } : pt); return recalcSectionFromPoints({ ...s, points: pts }); }); return recalcAllFollowingSections(newSections, dragging.sectionId); }); return; }
-        if (!drawMode && currentSection) { const idx = hitTestNode(currentSection.points, p, 8); setHoverNode(idx > -1 ? { sectionId: currentSection.id, index: idx } : { sectionId: null, index: -1 }); return; }
+
+        const p = snapGrid ? canvasPos(e, true) : rawPoint;
+
+        if (draggingStart) {
+            setInitialPose(prev => ({ ...prev, x: p.x, y: p.y }));
+            setSections(prev => {
+                const newSections = prev.map(sec => recalcSectionFromPoints(sec));
+                return recalcAllFollowingSections(newSections, prev[0].id);
+            });
+            return;
+        }
+
+        if (dragging.active) {
+            setSections(prev => {
+                const newSections = prev.map(s => {
+                    if (s.id !== dragging.sectionId) return s;
+                    const pts = s.points.map((pt, i) => i === dragging.index ? { ...pt, x: p.x, y: p.y } : pt);
+                    return recalcSectionFromPoints({ ...s, points: pts });
+                });
+                return recalcAllFollowingSections(newSections, dragging.sectionId);
+            });
+            return;
+        }
+
+        if (!drawMode && currentSection) {
+            const idx = hitTestNode(currentSection.points, p, 8);
+            setHoverNode(idx > -1 ? { sectionId: currentSection.id, index: idx } : { sectionId: null, index: -1 });
+            return;
+        }
+
         if (drawMode && currentSection) {
             const segmentReference = referenceMode;
             const basePose = currentSection.points.length
@@ -1326,42 +1469,57 @@ export default function WROPlaybackPlanner() {
                     theta: typeof last.heading === 'number' ? last.heading : basePose.theta,
                 };
             }
-            const { p: pSnapped, theta } = snapPointByAngle(p, anchorPose, reverseDrawing);
-            const previewPose = { x: pSnapped.x, y: pSnapped.y, theta };
+
+            const projection = projectPointWithReference(p, anchorPose, segmentReference, reverseDrawing);
+            const previewPose = { x: projection.center.x, y: projection.center.y, theta: projection.theta };
             const anchorDisplay = getReferencePoint(anchorPose, segmentReference);
             const previewDisplay = getReferencePoint(previewPose, segmentReference);
             setGhost({
-                x: pSnapped.x,
-                y: pSnapped.y,
-                theta,
+                x: previewPose.x,
+                y: previewPose.y,
+                theta: previewPose.theta,
                 reference: segmentReference,
                 displayX: previewDisplay.x,
                 displayY: previewDisplay.y,
                 originX: anchorDisplay.x,
                 originY: anchorDisplay.y,
+                active: true,
             });
+
             if (activeSession) {
-                const dist = Math.hypot(pSnapped.x - anchorPose.x, pSnapped.y - anchorPose.y);
+                const dist = segmentReference === 'tip' ? projection.referenceDistance : projection.distanceCenter;
                 if (dist >= DRAW_STEP_MIN_PX) {
+                    const now = Date.now();
+                    const last = drawThrottleRef.current.lastAutoAddTs;
+                    if (now - last < DRAW_AUTO_INTERVAL_MS) {
+                        return;
+                    }
+                    const centerPoint = projection.center;
                     setSections(prev => {
                         const updated = prev.map(s => {
                             if (s.id !== currentSection.id) return s;
-                            const newPts = [...s.points, { ...pSnapped, reverse: reverseDrawing, reference: segmentReference, heading: theta }];
+                            const newPts = [...s.points, { ...centerPoint, reverse: reverseDrawing, reference: segmentReference, heading: projection.theta }];
                             return recalcSectionFromPoints({ ...s, points: newPts });
                         });
                         return recalcAllFollowingSections(updated, currentSection.id);
                     });
                     drawSessionRef.current = {
                         active: true,
-                        lastPoint: { x: pSnapped.x, y: pSnapped.y, heading: theta },
+                        lastPoint: { x: centerPoint.x, y: centerPoint.y, heading: projection.theta },
                         addedDuringDrag: true,
                     };
+                    drawThrottleRef.current.lastAutoAddTs = now;
                 }
             }
         }
     };
 
     const onCanvasUp = () => {
+        rightPressActiveRef.current = false;
+        if (rightEraseTimerRef.current) {
+            clearInterval(rightEraseTimerRef.current);
+            rightEraseTimerRef.current = null;
+        }
         if (rulerActive) {
             setIsDraggingRuler(false);
             return;
@@ -1371,6 +1529,13 @@ export default function WROPlaybackPlanner() {
         if (drawSessionRef.current.active) {
             drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: drawSessionRef.current.addedDuringDrag };
         }
+        drawThrottleRef.current.lastAutoAddTs = 0;
+        setGhost(prev => (prev.active ? { ...prev, active: false } : prev));
+    };
+
+    const onCanvasLeave = () => {
+        setCursorGuide(prev => ({ ...prev, visible: false }));
+        onCanvasUp();
     };
 
     const onCanvasClick = (e) => {
@@ -1386,36 +1551,28 @@ export default function WROPlaybackPlanner() {
             drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false };
             return;
         }
-        const raw = canvasPos(e);
+        const rawPoint = canvasPos(e, false);
+        const p = snapGrid ? canvasPos(e, true) : rawPoint;
         const basePose = currentSection.points.length
             ? getLastPoseOfSection(currentSection)
             : computePoseUpToSection(currentSection.id);
-        const { p, theta } = snapPointByAngle(raw, basePose, reverseDrawing); // <-- guardar el PUNTO ya ajustado por 15°
         const segmentReference = referenceMode;
+        const projection = projectPointWithReference(p, basePose, segmentReference, reverseDrawing); // apunta la punta al mouse y convierte al centro
+        const centerPoint = projection.center;
         setSections(prev => {
             const updated = prev.map(s => {
                 if (s.id !== currentSection.id) return s;
-                const newPts = [...s.points, { ...p, reverse: reverseDrawing, reference: segmentReference, heading: theta }];
+                const newPts = [...s.points, { ...centerPoint, reverse: reverseDrawing, reference: segmentReference, heading: projection.theta }];
                 return recalcSectionFromPoints({ ...s, points: newPts });
             });
             return recalcAllFollowingSections(updated, currentSection.id);
         });
         drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false };
+        drawThrottleRef.current.lastAutoAddTs = Date.now();
     };
 
     const handleContextMenu = (e) => {
         e.preventDefault();
-        if (!drawMode || !currentSection) return;
-
-        setSections(prev =>
-            prev.map(s => {
-                if (s.id !== currentSection.id || s.points.length === 0) {
-                    return s;
-                }
-                const newPts = s.points.slice(0, -1);
-                return recalcSectionFromPoints({ ...s, points: newPts });
-            })
-        );
     };
 
     const stopPlayback = useCallback(() => {
@@ -1496,11 +1653,11 @@ export default function WROPlaybackPlanner() {
     const startMissionReverse = useCallback(() => {
         const list = sections.flatMap(s => s.actions);
         if (!list.length) return;
-        const endPose = computePoseAfterActions(initialPose, list);
+        const endPose = getPoseAfterActions(initialPose, list);
         const reverseList = buildReversePlayback(list);
         if (!reverseList.length) return;
         startPlayback(reverseList, endPose);
-    }, [sections, initialPose, computePoseAfterActions, buildReversePlayback, startPlayback]);
+    }, [sections, initialPose, getPoseAfterActions, buildReversePlayback, startPlayback]);
 
     const startSection = useCallback(() => {
         if (!currentSection) return;
@@ -1513,11 +1670,11 @@ export default function WROPlaybackPlanner() {
         const forwardList = currentSection.actions;
         if (!forwardList.length) return;
         const startPose = computePoseUpToSection(currentSection.id);
-        const endPose = computePoseAfterActions(startPose, forwardList);
+        const endPose = getPoseAfterActions(startPose, forwardList);
         const reverseList = buildReversePlayback(forwardList);
         if (!reverseList.length) return;
         startPlayback(reverseList, endPose);
-    }, [currentSection, computePoseUpToSection, computePoseAfterActions, buildReversePlayback, startPlayback]);
+    }, [currentSection, computePoseUpToSection, getPoseAfterActions, buildReversePlayback, startPlayback]);
 
     const pauseResume = () => { if (!isRunning) return; setIsPaused(p => !p); };
 
@@ -1545,8 +1702,8 @@ export default function WROPlaybackPlanner() {
                     {...{
                         drawMode,
                         setDrawMode,
-                        snapAngles,
-                        setSnapAngles,
+                        snap45,
+                        setSnap45,
                         snapGrid,
                         setSnapGrid,
                         isRunning,
@@ -1587,7 +1744,7 @@ export default function WROPlaybackPlanner() {
                                 onMouseMove={onCanvasMove}
                                 onMouseDown={onCanvasDown}
                                 onMouseUp={onCanvasUp}
-                                onMouseLeave={onCanvasUp}
+                                onMouseLeave={onCanvasLeave}
                                 onClick={onCanvasClick}
                                 onContextMenu={handleContextMenu}
                                 className={`canvas-surface ${isSettingOrigin ? 'cursor-copy' : 'cursor-crosshair'}`}
