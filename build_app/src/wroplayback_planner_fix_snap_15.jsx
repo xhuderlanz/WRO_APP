@@ -36,6 +36,7 @@ const OBSTACLE_HANDLE_SPACING = 6;
 const OBSTACLE_DRAG_THRESHOLD = 4;
 const NODE_SNAP_RADIUS = 18;
 const ZOOM_LIMITS = { min: 0.5, max: 2, step: 0.25 };
+const DEFAULT_ZOOM = 1.2;
 const SNAP_45_BASE_ANGLES = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
 const PLAYBACK_LINEAR_SPEED_UNITS_PER_SEC = 40;
 const PLAYBACK_ROTATION_DEG_PER_SEC = 300;
@@ -1202,7 +1203,7 @@ export default function WROPlaybackPlanner() {
     const [unit, setUnit] = useState('cm');
     const [reverseDrawing, setReverseDrawing] = useState(false);
     const [referenceMode, setReferenceMode] = useState('center');
-    const [zoom, setZoom] = useState(1);
+    const [zoom, setZoom] = useState(DEFAULT_ZOOM);
     const [canvasBaseSize, setCanvasBaseSize] = useState({ width: 0, height: 0 });
     const [cursorGuide, setCursorGuide] = useState({ x: 0, y: 0, visible: false });
     const sectionNodesRef = useRef(new Map());
@@ -1410,7 +1411,7 @@ export default function WROPlaybackPlanner() {
     }, []);
 
     const handleZoomReset = useCallback(() => {
-        setZoom(1);
+        setZoom(DEFAULT_ZOOM);
     }, [setZoom]);
 
     const addObstacle = useCallback(() => {
