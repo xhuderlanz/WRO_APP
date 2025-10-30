@@ -32,7 +32,9 @@ const DEFAULT_OBSTACLE_COLOR = "#ef4444";
 const DEFAULT_OBSTACLE_OPACITY = 0.35;
 const OBSTACLE_RENDER = { fill: "rgba(248,113,113,0.25)", stroke: "#ef4444", blockedStroke: "#dc2626" };
 const OBSTACLE_HANDLE_SIZE = 10;
+const OBSTACLE_HANDLE_SPACING = 6;
 const OBSTACLE_DRAG_THRESHOLD = 4;
+const NODE_SNAP_RADIUS = 18;
 const ZOOM_LIMITS = { min: 0.5, max: 2, step: 0.25 };
 const SNAP_45_BASE_ANGLES = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
 const PLAYBACK_LINEAR_SPEED_UNITS_PER_SEC = 40;
@@ -136,11 +138,7 @@ const drawDirectionSymbol = (context, x, y, angle, color, isReverse) => {
         drawHead();
     } else {
         context.save();
-        context.rotate(Math.PI / 4);
-        drawHead();
-        context.restore();
-        context.save();
-        context.rotate(-Math.PI / 4);
+        context.rotate(Math.PI);
         drawHead();
         context.restore();
     }
@@ -215,6 +213,7 @@ const IconEye = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height=
 const IconEyeOff = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>;
 const IconRuler = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L3 8.4a2.4 2.4 0 0 1 0-3.4l2.6-2.6a2.4 2.4 0 0 1 3.4 0L15.3 21.3"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/></svg>;
 const IconTarget = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>;
+const IconTrash = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="m8 6 .5-2h7l.5 2"/><path d="M9 6v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>;
 
 const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOpacity, setBgOpacity, grid, setGrid, robot, setRobot, initialPose, setInitialPose, handleBgUpload, handleRobotImageUpload, setIsSettingOrigin, unit, setUnit }) => {
     const isMM = unit === 'mm';
@@ -531,7 +530,7 @@ const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOp
     );
 };
 
-const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed, setIsCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, unit }) => {
+const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, removeSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed, setIsCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, toggleSectionIsolation, isolatedSectionId, unit }) => {
     const [draggedAction, setDraggedAction] = useState(null);
 
     const handleActionDragStart = (e, sectionId, actionIndex) => { setDraggedAction({ sectionId, actionIndex }); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ''); };
@@ -588,10 +587,24 @@ const SectionsPanel = ({ sections, setSections, selectedSectionId, setSelectedSe
                                     onClick={e => e.stopPropagation()}
                                 />
                                 <button
+                                    onClick={(e) => { e.stopPropagation(); toggleSectionIsolation(s.id); }}
+                                    className={`toolbar-btn px-2 py-1 ${isolatedSectionId === s.id ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}
+                                    title={isolatedSectionId === s.id ? 'Mostrar todas las secciones' : 'Mostrar solo esta sección'}
+                                >
+                                    <IconTarget />
+                                </button>
+                                <button
                                     onClick={(e) => { e.stopPropagation(); toggleSectionVisibility(s.id); }}
                                     className={`toolbar-btn px-2 py-1 ${s.isVisible ? 'toolbar-btn--muted' : 'toolbar-btn--muted opacity-40'}`}
                                 >
                                     {s.isVisible ? <IconEye /> : <IconEyeOff />}
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); removeSection(s.id); }}
+                                    className="toolbar-btn toolbar-btn--rose px-2 py-1"
+                                    title="Eliminar sección"
+                                >
+                                    <IconTrash />
                                 </button>
                             </div>
                             {isExpanded && (
@@ -1146,6 +1159,9 @@ export default function WROPlaybackPlanner() {
     const [robotImgObj, setRobotImgObj] = useState(null);
     const [showRobot, setShowRobot] = useState(true);
     const [playbackSpeedMultiplier, setPlaybackSpeedMultiplier] = useState(1);
+    const [panelWidth, setPanelWidth] = useState(420);
+    const [isWideLayout, setIsWideLayout] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : false));
+    const [isPanelResizing, setIsPanelResizing] = useState(false);
     const [sections, setSections] = useState([{ id: uid('sec'), name: 'Sección 1', points: [], actions: [], color: DEFAULT_ROBOT.color, isVisible: true }]);
     const [obstacles, setObstacles] = useState([]);
     const [obstacleMode, setObstacleMode] = useState(false);
@@ -1155,7 +1171,7 @@ export default function WROPlaybackPlanner() {
     const [expandedSections, setExpandedSections] = useState([sections[0].id]);
     const [initialPose, setInitialPose] = useState({ x: 120, y: 120, theta: 0 });
     const [playPose, setPlayPose] = useState({ ...initialPose });
-    const [drawMode, setDrawMode] = useState(true);
+    const [drawMode, setDrawMode] = useState(false);
     const [snapGrid, setSnapGrid] = useState(true);
     const [snap45, setSnap45] = useState(false);
     const [ghost, setGhost] = useState({
@@ -1178,6 +1194,7 @@ export default function WROPlaybackPlanner() {
     const [isPaused, setIsPaused] = useState(false);
     const [showOptions, setShowOptions] = useState(false);
     const [isSectionsPanelCollapsed, setIsSectionsPanelCollapsed] = useState(false);
+    const [isolatedSectionId, setIsolatedSectionId] = useState(null);
     const [rulerActive, setRulerActive] = useState(false);
     const [rulerPoints, setRulerPoints] = useState({ start: null, end: null });
     const [isDraggingRuler, setIsDraggingRuler] = useState(false);
@@ -1192,6 +1209,10 @@ export default function WROPlaybackPlanner() {
     const drawSessionRef = useRef({ active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() });
     const drawThrottleRef = useRef({ lastAutoAddTs: 0 });
     const playbackSpeedRef = useRef(1);
+    const isPausedRef = useRef(false);
+    const mainGridRef = useRef(null);
+    const panelResizeActiveRef = useRef(false);
+    const leftPanelRef = useRef(null);
     const DRAW_STEP_MIN_PX = 6;
     const DRAW_AUTO_INTERVAL_MS = 340;
     const COLLISION_ANIMATION_DURATION_MS = 900;
@@ -1276,15 +1297,21 @@ export default function WROPlaybackPlanner() {
         const rect = getObstacleRectBounds(obstacle);
         if (!rect) return null;
         const handleHalf = OBSTACLE_HANDLE_SIZE / 2;
+        const offset = handleHalf + OBSTACLE_HANDLE_SPACING;
         const handles = [
-            { corner: 'top-left', x: rect.left, y: rect.top },
-            { corner: 'top-right', x: rect.right, y: rect.top },
-            { corner: 'bottom-right', x: rect.right, y: rect.bottom },
-            { corner: 'bottom-left', x: rect.left, y: rect.bottom },
+            { corner: 'top-left', centerX: rect.left - offset, centerY: rect.top - offset, cornerX: rect.left, cornerY: rect.top },
+            { corner: 'top-right', centerX: rect.right + offset, centerY: rect.top - offset, cornerX: rect.right, cornerY: rect.top },
+            { corner: 'bottom-right', centerX: rect.right + offset, centerY: rect.bottom + offset, cornerX: rect.right, cornerY: rect.bottom },
+            { corner: 'bottom-left', centerX: rect.left - offset, centerY: rect.bottom + offset, cornerX: rect.left, cornerY: rect.bottom },
         ];
         for (const handle of handles) {
-            if (Math.abs(point.x - handle.x) <= handleHalf && Math.abs(point.y - handle.y) <= handleHalf) {
-                return { obstacleId: obstacle.id, corner: handle.corner, x: handle.x, y: handle.y, rect };
+            if (Math.abs(point.x - handle.centerX) <= handleHalf && Math.abs(point.y - handle.centerY) <= handleHalf) {
+                return {
+                    obstacleId: obstacle.id,
+                    corner: handle.corner,
+                    rect,
+                    pointerOffset: { x: point.x - handle.cornerX, y: point.y - handle.cornerY },
+                };
             }
         }
         return null;
@@ -1904,6 +1931,55 @@ export default function WROPlaybackPlanner() {
         return null;
     }, []);
 
+    const findSnapCandidate = useCallback((point, radius = NODE_SNAP_RADIUS) => {
+        if (!point) return null;
+        let closest = null;
+        sectionNodesRef.current.forEach((nodes = [], sectionId) => {
+            nodes.forEach(node => {
+                if (!node || node.kind !== 'move') return;
+                const nodePose = node.endPose && Number.isFinite(node.endPose.x) && Number.isFinite(node.endPose.y)
+                    ? node.endPose
+                    : {
+                        x: node.centerX,
+                        y: node.centerY,
+                        theta: typeof node.heading === 'number' ? node.heading : 0,
+                    };
+                const targetTip = getReferencePoint(nodePose, 'tip');
+                const targetPoints = [
+                    { x: node.centerX, y: node.centerY, reference: 'center' },
+                    { x: targetTip.x, y: targetTip.y, reference: 'tip' },
+                ];
+                targetPoints.forEach(candidate => {
+                    const dist = Math.hypot(candidate.x - point.x, candidate.y - point.y);
+                    if (dist > radius) return;
+                    if (closest && dist >= closest.distance) return;
+                    closest = {
+                        sectionId,
+                        nodeKey: node.key || null,
+                        pointIndex: Number.isInteger(node.pointIndex) ? node.pointIndex : -1,
+                        distance: dist,
+                        targetPoint: { x: candidate.x, y: candidate.y },
+                        targetReference: candidate.reference,
+                    };
+                });
+            });
+        });
+        if (Number.isFinite(initialPose?.x) && Number.isFinite(initialPose?.y)) {
+            const dist = Math.hypot(initialPose.x - point.x, initialPose.y - point.y);
+            if (dist <= radius && (!closest || dist < closest.distance)) {
+                closest = {
+                    sectionId: null,
+                    nodeKey: 'initial-pose',
+                    pointIndex: -1,
+                    distance: dist,
+                    targetPoint: { x: initialPose.x, y: initialPose.y },
+                    targetReference: 'center',
+                };
+            }
+        }
+        return closest;
+    }, [getReferencePoint, initialPose]);
+
     const draw = useCallback(() => {
         const cvs = canvasRef.current; if (!cvs) return; const ctx = cvs.getContext('2d');
         ctx.clearRect(0, 0, cvs.width, cvs.height);
@@ -1987,11 +2063,12 @@ export default function WROPlaybackPlanner() {
 
             if (isSelected && obstacleMode && fadeFactor > 0.15) {
                 const handleHalf = OBSTACLE_HANDLE_SIZE / 2;
+                const handleOffset = handleHalf + OBSTACLE_HANDLE_SPACING;
                 const handlePoints = [
-                    { x: -halfW, y: -halfH },
-                    { x: halfW, y: -halfH },
-                    { x: halfW, y: halfH },
-                    { x: -halfW, y: halfH },
+                    { x: -halfW - handleOffset, y: -halfH - handleOffset },
+                    { x: halfW + handleOffset, y: -halfH - handleOffset },
+                    { x: halfW + handleOffset, y: halfH + handleOffset },
+                    { x: -halfW - handleOffset, y: halfH + handleOffset },
                 ];
                 const handleHex = getContrastingHex(obstacle.fillColor || DEFAULT_OBSTACLE_COLOR);
                 ctx.fillStyle = hexToRgba(handleHex, 0.25);
@@ -2165,7 +2242,8 @@ export default function WROPlaybackPlanner() {
                 const drawY = Number.isFinite(node.displayY) ? node.displayY : node.centerY;
                 const isEditing = !drawMode;
                 const isDraggingNode = isEditing && node.draggable && dragging.active && dragging.sectionId === s.id && dragging.index === node.pointIndex;
-                const isHoverNode = isEditing && hoverNode.sectionId === s.id && hoverNode.key === node.key;
+                const highlightHover = hoverNode.sectionId === s.id && hoverNode.key === node.key;
+                const isHoverNode = (isEditing || drawMode) && highlightHover;
 
                 if (node.kind === 'rotation') {
                     const ringRadius = isHoverNode ? 8 : 6;
@@ -2193,15 +2271,9 @@ export default function WROPlaybackPlanner() {
                 let fillColor;
                 switch (role) {
                     case 'start':
-                        fillColor = '#22c55e';
-                        break;
-                    case 'end':
-                        fillColor = '#ef4444';
-                        break;
                     case 'single':
                         fillColor = '#22c55e';
                         break;
-                    case 'middle':
                     default:
                         fillColor = '#facc15';
                         break;
@@ -2385,6 +2457,32 @@ export default function WROPlaybackPlanner() {
         playbackSpeedRef.current = playbackSpeedMultiplier;
     }, [playbackSpeedMultiplier]);
     useEffect(() => {
+        isPausedRef.current = isPaused;
+        if (isPaused) {
+            lastTickRef.current = Date.now();
+        }
+    }, [isPaused]);
+    useEffect(() => {
+        const handleWindowResize = () => {
+            const isWide = window.innerWidth >= 1024;
+            setIsWideLayout(isWide);
+        };
+        handleWindowResize();
+        window.addEventListener('resize', handleWindowResize);
+        return () => window.removeEventListener('resize', handleWindowResize);
+    }, []);
+    useEffect(() => {
+        if (!isWideLayout || !mainGridRef.current) {
+            panelResizeActiveRef.current = false;
+            setIsPanelResizing(false);
+            return;
+        }
+        const rect = mainGridRef.current.getBoundingClientRect();
+        const minWidth = 280;
+        const maxWidth = Math.max(minWidth, rect.width - 380);
+        setPanelWidth(prev => Math.max(minWidth, Math.min(maxWidth, prev)));
+    }, [isWideLayout]);
+    useEffect(() => {
         if (drawMode) {
             setHoverNode({ sectionId: null, key: null, pointIndex: -1, kind: null });
         }
@@ -2469,6 +2567,7 @@ export default function WROPlaybackPlanner() {
             const handleHit = findObstacleHandleAtPoint(point);
             if (handleHit) {
                 const rect = handleHit.rect;
+                const pointerOffset = handleHit.pointerOffset || { x: 0, y: 0 };
                 const opposite = (() => {
                     switch (handleHit.corner) {
                         case 'top-left':
@@ -2489,7 +2588,7 @@ export default function WROPlaybackPlanner() {
                     corner: handleHit.corner,
                     offsetX: 0,
                     offsetY: 0,
-                    baseRect: { opposite },
+                    baseRect: { opposite, pointerOffset },
                 });
                 return;
             }
@@ -2603,8 +2702,30 @@ export default function WROPlaybackPlanner() {
                 const opposite = obstacleTransform.baseRect?.opposite;
                 if (!opposite) return;
                 const minSize = 10;
-                const px = rawPoint.x;
-                const py = rawPoint.y;
+                const pointerOffset = obstacleTransform.baseRect?.pointerOffset || { x: 0, y: 0 };
+                let px = rawPoint.x - pointerOffset.x;
+                let py = rawPoint.y - pointerOffset.y;
+
+                switch (obstacleTransform.corner) {
+                    case 'top-left':
+                        px = Math.min(px, opposite.x - minSize);
+                        py = Math.min(py, opposite.y - minSize);
+                        break;
+                    case 'top-right':
+                        px = Math.max(px, opposite.x + minSize);
+                        py = Math.min(py, opposite.y - minSize);
+                        break;
+                    case 'bottom-right':
+                        px = Math.max(px, opposite.x + minSize);
+                        py = Math.max(py, opposite.y + minSize);
+                        break;
+                    case 'bottom-left':
+                    default:
+                        px = Math.min(px, opposite.x - minSize);
+                        py = Math.max(py, opposite.y + minSize);
+                        break;
+                }
+
                 const nextWidth = Math.max(minSize, Math.abs(opposite.x - px));
                 const nextHeight = Math.max(minSize, Math.abs(opposite.y - py));
                 const centerX = (opposite.x + px) / 2;
@@ -2679,16 +2800,37 @@ export default function WROPlaybackPlanner() {
                 };
             }
 
-            const projection = projectPointWithReference(p, anchorPose, segmentReference, reverseDrawing);
+            const snapCandidate = findSnapCandidate(rawPoint);
+            let targetPoint = p;
+            let activeReference = segmentReference;
+            if (snapCandidate) {
+                targetPoint = { x: snapCandidate.targetPoint.x, y: snapCandidate.targetPoint.y };
+                activeReference = snapCandidate.targetReference || segmentReference;
+                setHoverNode(prev => {
+                    if (prev.sectionId === snapCandidate.sectionId && prev.key === snapCandidate.nodeKey) {
+                        return prev;
+                    }
+                    return {
+                        sectionId: snapCandidate.sectionId,
+                        key: snapCandidate.nodeKey,
+                        pointIndex: snapCandidate.pointIndex,
+                        kind: 'move',
+                    };
+                });
+            } else {
+                setHoverNode(prev => (prev.sectionId ? { sectionId: null, key: null, pointIndex: -1, kind: null } : prev));
+            }
+
+            const projection = projectPointWithReference(targetPoint, anchorPose, activeReference, reverseDrawing);
             const previewPose = { x: projection.center.x, y: projection.center.y, theta: projection.theta };
-            const { startPoint: segmentStart, endPoint: segmentEnd, collisions } = evaluateSegmentCollision(anchorPose, previewPose, segmentReference);
-            const fallbackOrigin = segmentStart || getReferencePoint(anchorPose, segmentReference);
-            const previewDisplay = segmentEnd || getReferencePoint(previewPose, segmentReference);
+            const { startPoint: segmentStart, endPoint: segmentEnd, collisions } = evaluateSegmentCollision(anchorPose, previewPose, activeReference);
+            const fallbackOrigin = segmentStart || getReferencePoint(anchorPose, activeReference);
+            const previewDisplay = segmentEnd || getReferencePoint(previewPose, activeReference);
             setGhost({
                 x: previewPose.x,
                 y: previewPose.y,
                 theta: previewPose.theta,
-                reference: segmentReference,
+                reference: activeReference,
                 displayX: previewDisplay.x,
                 displayY: previewDisplay.y,
                 originX: fallbackOrigin.x,
@@ -2699,15 +2841,15 @@ export default function WROPlaybackPlanner() {
             });
 
             if (activeSession) {
-                const dist = segmentReference === 'tip' ? projection.referenceDistance : projection.distanceCenter;
+                const dist = activeReference === 'tip' ? projection.referenceDistance : projection.distanceCenter;
                 if (dist >= DRAW_STEP_MIN_PX) {
                     const now = Date.now();
                     const last = drawThrottleRef.current.lastAutoAddTs;
                     if (now - last < DRAW_AUTO_INTERVAL_MS) {
                         return;
                     }
-                    const result = appendPointToCurrentSection(p, {
-                        reference: segmentReference,
+                    const result = appendPointToCurrentSection(targetPoint, {
+                        reference: activeReference,
                         reverse: reverseDrawing,
                         heading: projection.theta,
                         anchorPose,
@@ -2779,9 +2921,14 @@ export default function WROPlaybackPlanner() {
             return;
         }
         const rawPoint = canvasPos(e, false);
-        const p = snapGrid ? canvasPos(e, true) : rawPoint;
-        const result = appendPointToCurrentSection(p, {
-            reference: referenceMode,
+        const gridPoint = snapGrid ? canvasPos(e, true) : rawPoint;
+        const snapCandidate = findSnapCandidate(rawPoint);
+        const activeReference = snapCandidate ? (snapCandidate.targetReference || referenceMode) : referenceMode;
+        const targetPoint = snapCandidate
+            ? { x: snapCandidate.targetPoint.x, y: snapCandidate.targetPoint.y }
+            : gridPoint;
+        const result = appendPointToCurrentSection(targetPoint, {
+            reference: activeReference,
             reverse: reverseDrawing,
         });
         if (result?.success) {
@@ -2800,6 +2947,7 @@ export default function WROPlaybackPlanner() {
         cancelAnimationFrame(animRef.current);
         setIsRunning(false);
         setIsPaused(false);
+    isPausedRef.current = false;
         actionCursorRef.current = { list: [], idx: 0, phase: 'idle', remainingPx: 0, remainingAngle: 0, moveDirection: 1, moveTotalPx: 0 };
         collisionPlaybackRef.current = new Map();
         lastTickRef.current = Date.now();
@@ -2807,7 +2955,9 @@ export default function WROPlaybackPlanner() {
         setPlayPose({ ...initialPose });
     }, [initialPose]);
     const tick = useCallback(() => {
-        if (isPaused) { lastTickRef.current = Date.now(); animRef.current = requestAnimationFrame(tick); return; }
+        if (isPausedRef.current) {
+            return;
+        }
         const nowTs = Date.now();
         const deltaMs = Math.max(0, nowTs - lastTickRef.current);
         lastTickRef.current = nowTs;
@@ -2893,12 +3043,13 @@ export default function WROPlaybackPlanner() {
             return pose;
         });
         animRef.current = requestAnimationFrame(tick);
-    }, [isPaused, stopPlayback, unitToPx]);
+    }, [stopPlayback, unitToPx]);
     const startPlayback = useCallback((list, startPose) => {
         if (!list.length) return;
         cancelAnimationFrame(animRef.current);
         setIsRunning(true);
         setIsPaused(false);
+    isPausedRef.current = false;
         const collisionMap = new Map();
         list.forEach((action, index) => {
             if (action.type === 'move' && action.collisionApproved && Array.isArray(action.collisionObstacleIds) && action.collisionObstacleIds.length) {
@@ -2944,7 +3095,21 @@ export default function WROPlaybackPlanner() {
         startPlayback(reverseList, endPose);
     }, [currentSection, computePoseUpToSection, getPoseAfterActions, buildReversePlayback, startPlayback]);
 
-    const pauseResume = () => { if (!isRunning) return; setIsPaused(p => !p); };
+    const pauseResume = useCallback(() => {
+        if (!isRunning) return;
+        setIsPaused(prev => {
+            const next = !prev;
+            isPausedRef.current = next;
+            if (next) {
+                cancelAnimationFrame(animRef.current);
+                lastTickRef.current = Date.now();
+            } else {
+                lastTickRef.current = Date.now();
+                animRef.current = requestAnimationFrame(tick);
+            }
+            return next;
+        });
+    }, [isRunning, tick]);
 
     const handleRulerToggle = () => {
         const isTurningOn = !rulerActive;
@@ -2962,13 +3127,133 @@ export default function WROPlaybackPlanner() {
         if (!Number.isFinite(value)) return;
         setPlaybackSpeedMultiplier(Math.min(2, Math.max(0.25, value)));
     }, [setPlaybackSpeedMultiplier]);
-    const addSection = () => { const id = uid('sec'); const lastSectionColor = sections.length > 0 ? sections[sections.length - 1].color : robot.color; const newSec = { id, name: `Sección ${sections.length + 1}`, points: [], actions: [], color: lastSectionColor, isVisible: true }; setSections(prev => [...prev, newSec]); setSelectedSectionId(id); setExpandedSections(prev => [...prev, id]); setDrawMode(true); };
+    const handlePanelResizeMove = useCallback((event) => {
+        if (!panelResizeActiveRef.current || !mainGridRef.current) return;
+        event.preventDefault();
+    const rect = mainGridRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const minWidth = 280;
+    const maxWidth = Math.max(minWidth, rect.width - 380);
+        const offset = event.clientX - rect.left;
+        const nextWidth = Math.max(minWidth, Math.min(maxWidth, offset));
+        setPanelWidth(nextWidth);
+    }, []);
+    const stopPanelResize = useCallback(() => {
+        if (!panelResizeActiveRef.current) return;
+        panelResizeActiveRef.current = false;
+        setIsPanelResizing(false);
+        window.removeEventListener('pointermove', handlePanelResizeMove);
+        window.removeEventListener('pointerup', stopPanelResize);
+        if (leftPanelRef.current) {
+            leftPanelRef.current.style.cursor = '';
+        }
+    }, [handlePanelResizeMove]);
+    const startPanelResize = useCallback((event) => {
+        if (!isWideLayout) return;
+        panelResizeActiveRef.current = true;
+        setIsPanelResizing(true);
+        event.preventDefault();
+        if (leftPanelRef.current) {
+            leftPanelRef.current.style.cursor = 'col-resize';
+        }
+        window.addEventListener('pointermove', handlePanelResizeMove);
+        window.addEventListener('pointerup', stopPanelResize);
+    }, [handlePanelResizeMove, isWideLayout, stopPanelResize]);
+    useEffect(() => {
+        return () => {
+            window.removeEventListener('pointermove', handlePanelResizeMove);
+            window.removeEventListener('pointerup', stopPanelResize);
+        };
+    }, [handlePanelResizeMove, stopPanelResize]);
+    const handleLeftPanelPointerDown = useCallback((event) => {
+        if (!isWideLayout) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const distanceToEdge = rect.right - event.clientX;
+        if (distanceToEdge <= 12) {
+            startPanelResize(event);
+        }
+    }, [isWideLayout, startPanelResize]);
+    const handleLeftPanelPointerMove = useCallback((event) => {
+        if (!isWideLayout || panelResizeActiveRef.current) return;
+        const rect = event.currentTarget.getBoundingClientRect();
+        const distanceToEdge = rect.right - event.clientX;
+        event.currentTarget.style.cursor = distanceToEdge <= 12 ? 'col-resize' : '';
+    }, [isWideLayout]);
+    const handleLeftPanelPointerLeave = useCallback((event) => {
+        if (!panelResizeActiveRef.current) {
+            event.currentTarget.style.cursor = '';
+        }
+    }, []);
+    const addSection = () => {
+        const id = uid('sec');
+        const lastSectionColor = sections.length > 0 ? sections[sections.length - 1].color : robot.color;
+        const newSec = { id, name: `Sección ${sections.length + 1}`, points: [], actions: [], color: lastSectionColor, isVisible: true };
+        setIsolatedSectionId(null);
+        setSections(prev => {
+            const normalized = prev.map(sec => (sec.isVisible ? sec : { ...sec, isVisible: true }));
+            return [...normalized, newSec];
+        });
+        setSelectedSectionId(id);
+        setExpandedSections([id]);
+        setDrawMode(true);
+    };
     const toggleSectionExpansion = (id) => { setExpandedSections(ids => ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]); };
-    const toggleSectionVisibility = (id) => { setSections(secs => secs.map(s => s.id === id ? { ...s, isVisible: !s.isVisible } : s)); };
+    const toggleSectionVisibility = (id) => {
+        setIsolatedSectionId(null);
+        setSections(secs => secs.map(s => (s.id === id ? { ...s, isVisible: !s.isVisible } : s)));
+    };
+    const toggleSectionIsolation = useCallback((sectionId) => {
+        setIsolatedSectionId(prev => {
+            const nextId = prev === sectionId ? null : sectionId;
+            setSections(prevSections => prevSections.map(sec => ({
+                ...sec,
+                isVisible: nextId === null ? true : sec.id === nextId,
+            })));
+            if (nextId) {
+                setSelectedSectionId(sectionId);
+                setExpandedSections(prevExpanded => (prevExpanded.includes(sectionId) ? prevExpanded : [...prevExpanded, sectionId]));
+            }
+            return nextId;
+        });
+    }, [setSections, setSelectedSectionId, setExpandedSections]);
+    const handleRemoveSection = useCallback((sectionId) => {
+        if (sections.length <= 1) {
+            window.alert('Debe existir al menos una sección. Añade otra antes de eliminar la actual.');
+            return;
+        }
+        const target = sections.find(s => s.id === sectionId);
+        if (!target) return;
+        const label = target.name && target.name.trim() ? target.name.trim() : 'esta sección';
+        const confirmed = window.confirm(`¿Seguro que deseas eliminar "${label}"?`);
+        if (!confirmed) return;
+        const filtered = sections.filter(s => s.id !== sectionId);
+        const removingIsolated = isolatedSectionId === sectionId;
+        const nextSections = removingIsolated ? filtered.map(sec => ({ ...sec, isVisible: true })) : filtered;
+        setSections(nextSections);
+        if (removingIsolated) {
+            setIsolatedSectionId(null);
+        }
+        if (!nextSections.length) {
+            setSelectedSectionId(null);
+            setExpandedSections([]);
+            return;
+        }
+        const stillSelected = nextSections.some(s => s.id === selectedSectionId);
+        const removedIndex = sections.findIndex(s => s.id === sectionId);
+        const fallbackIndex = Math.max(0, Math.min(nextSections.length - 1, removedIndex - 1));
+        const nextSelectedId = stillSelected && selectedSectionId
+            ? selectedSectionId
+            : (nextSections[fallbackIndex]?.id ?? nextSections[0].id);
+        setSelectedSectionId(nextSelectedId);
+        setExpandedSections(prev => {
+            const next = prev.filter(id => id !== sectionId && nextSections.some(s => s.id === id));
+            return next.length ? next : [nextSelectedId];
+        });
+    }, [sections, selectedSectionId, isolatedSectionId]);
     const handleBgUpload = (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { const img = new Image(); img.onload = () => setBgImage(img); img.src = r.result; }; r.readAsDataURL(f); };
     const handleRobotImageUpload = (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => setRobot(rbt => ({ ...rbt, imageSrc: r.result })); r.readAsDataURL(f); };
     const exportMission = () => { const payload = { fieldKey, grid: { ...grid, cellSize: grid.cellSize }, robot: { ...robot, imageSrc: null }, initialPose, sections, obstacles, bgOpacity }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `wro_mission_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`; a.click(); URL.revokeObjectURL(url); };
-    const importMission = (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { const data = JSON.parse(r.result); if (Array.isArray(data.sections)) setSections(data.sections.map(s => ({...s, isVisible: s.isVisible !== false}))); if (Array.isArray(data.obstacles)) setObstacles(data.obstacles.map(obs => ({ id: obs.id || uid('obs'), name: obs.name || 'Obstaculo', x: (() => { const n = Number(obs.x); return Number.isFinite(n) ? n : 0; })(), y: (() => { const n = Number(obs.y); return Number.isFinite(n) ? n : 0; })(), width: (() => { const n = Number(obs.width); return Number.isFinite(n) ? n : DEFAULT_OBSTACLE_SIZE.width; })(), height: (() => { const n = Number(obs.height); return Number.isFinite(n) ? n : DEFAULT_OBSTACLE_SIZE.height; })(), isActive: obs.isActive !== false, fillColor: typeof obs.fillColor === 'string' && obs.fillColor.trim() ? obs.fillColor : DEFAULT_OBSTACLE_COLOR, opacity: (() => { const val = Number(obs.opacity); return Number.isFinite(val) ? Math.min(1, Math.max(0, val)) : DEFAULT_OBSTACLE_OPACITY; })() }))); if (data.initialPose) setInitialPose(data.initialPose); if (data.robot) setRobot(prev => ({ ...prev, ...data.robot })); if (data.grid) setGrid(prev => ({ ...prev, ...data.grid })); if (data.fieldKey) setFieldKey(data.fieldKey); if (typeof data.bgOpacity === 'number') setBgOpacity(data.bgOpacity); } catch (err) { console.error('Invalid mission file', err); alert('No se pudo importar: archivo inválido'); } }; r.readAsText(f); };return (
+    const importMission = (e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => { try { const data = JSON.parse(r.result); setIsolatedSectionId(null); if (Array.isArray(data.sections)) setSections(data.sections.map(s => ({...s, isVisible: s.isVisible !== false}))); if (Array.isArray(data.obstacles)) setObstacles(data.obstacles.map(obs => ({ id: obs.id || uid('obs'), name: obs.name || 'Obstaculo', x: (() => { const n = Number(obs.x); return Number.isFinite(n) ? n : 0; })(), y: (() => { const n = Number(obs.y); return Number.isFinite(n) ? n : 0; })(), width: (() => { const n = Number(obs.width); return Number.isFinite(n) ? n : DEFAULT_OBSTACLE_SIZE.width; })(), height: (() => { const n = Number(obs.height); return Number.isFinite(n) ? n : DEFAULT_OBSTACLE_SIZE.height; })(), isActive: obs.isActive !== false, fillColor: typeof obs.fillColor === 'string' && obs.fillColor.trim() ? obs.fillColor : DEFAULT_OBSTACLE_COLOR, opacity: (() => { const val = Number(obs.opacity); return Number.isFinite(val) ? Math.min(1, Math.max(0, val)) : DEFAULT_OBSTACLE_OPACITY; })() }))); if (data.initialPose) setInitialPose(data.initialPose); if (data.robot) setRobot(prev => ({ ...prev, ...data.robot })); if (data.grid) setGrid(prev => ({ ...prev, ...data.grid })); if (data.fieldKey) setFieldKey(data.fieldKey); if (typeof data.bgOpacity === 'number') setBgOpacity(data.bgOpacity); } catch (err) { console.error('Invalid mission file', err); alert('No se pudo importar: archivo inválido'); } }; r.readAsText(f); };return (
         <div className="w-full h-full min-h-screen">
             <main className="app-shell">
                 <Toolbar
@@ -3007,14 +3292,35 @@ export default function WROPlaybackPlanner() {
                         showZoomGroup: false,
                     }}
                 />
-                <div className="main-grid">
+                <div
+                    className="main-grid"
+                    ref={mainGridRef}
+                    data-wide={isWideLayout ? 'true' : 'false'}
+                    style={isWideLayout ? { gridTemplateColumns: `${Math.round(panelWidth)}px 12px 1fr` } : undefined}
+                >
                     {/* PANEL IZQUIERDO (card) */}
-                    <aside className="left-panel">
+                    <aside
+                        className="left-panel"
+                        ref={leftPanelRef}
+                        onPointerDown={handleLeftPanelPointerDown}
+                        onPointerMove={handleLeftPanelPointerMove}
+                        onPointerLeave={handleLeftPanelPointerLeave}
+                    >
                         <div className="sections-list">
-                            <SectionsPanel {...{ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed: isSectionsPanelCollapsed, setIsCollapsed: setIsSectionsPanelCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, unit }} />
+                            <SectionsPanel {...{ sections, setSections, selectedSectionId, setSelectedSectionId, addSection, removeSection: handleRemoveSection, exportMission, importMission, updateSectionActions, computePoseUpToSection, pxToUnit, isCollapsed: isSectionsPanelCollapsed, setIsCollapsed: setIsSectionsPanelCollapsed, expandedSections, toggleSectionExpansion, toggleSectionVisibility, toggleSectionIsolation, isolatedSectionId, unit }} />
                             <ObstaclesPanel {...{ obstacles, addObstacle, updateObstacle, removeObstacle }} />
                         </div>
                     </aside>
+
+                    {isWideLayout && (
+                        <div
+                            className={`panel-resizer ${isPanelResizing ? 'panel-resizer--active' : ''}`}
+                            onPointerDown={startPanelResize}
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-label="Ajustar ancho del panel"
+                        />
+                    )}
 
                     {/* AREA DEL CANVAS (card limpia) */}
                     <section className="canvas-card" aria-label="Canvas">
