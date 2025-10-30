@@ -35,6 +35,8 @@ const OBSTACLE_HANDLE_SIZE = 10;
 const OBSTACLE_DRAG_THRESHOLD = 4;
 const ZOOM_LIMITS = { min: 0.5, max: 2, step: 0.25 };
 const SNAP_45_BASE_ANGLES = [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4];
+const PLAYBACK_LINEAR_SPEED_UNITS_PER_SEC = 40;
+const PLAYBACK_ROTATION_DEG_PER_SEC = 300;
 
 const toRect = (obstacle) => {
     const halfW = (obstacle.width || DEFAULT_OBSTACLE_SIZE.width) / 2;
@@ -105,6 +107,57 @@ const getContrastingHex = (hex) => {
     const b = parseInt(sanitized.slice(4, 6), 16) || 0;
     const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
     return luminance > 140 ? '#0f172a' : '#ffffff';
+};
+
+const applyAlphaToColor = (baseColor, alpha = 1) => {
+    if (typeof baseColor !== 'string') return baseColor;
+    const trimmed = baseColor.trim();
+    if (trimmed.startsWith('#')) {
+        return hexToRgba(trimmed, alpha);
+    }
+    return trimmed;
+};
+
+const drawDirectionSymbol = (context, x, y, angle, color, isReverse) => {
+    const size = 11;
+    context.save();
+    context.translate(x, y);
+    context.rotate(angle);
+    context.fillStyle = color;
+    const drawHead = () => {
+        context.beginPath();
+        context.moveTo(0, 0);
+        context.lineTo(-size, size * 0.55);
+        context.lineTo(-size, -size * 0.55);
+        context.closePath();
+        context.fill();
+    };
+    if (!isReverse) {
+        drawHead();
+    } else {
+        context.save();
+        context.rotate(Math.PI / 4);
+        drawHead();
+        context.restore();
+        context.save();
+        context.rotate(-Math.PI / 4);
+        drawHead();
+        context.restore();
+    }
+    context.restore();
+};
+
+const drawMovementLabel = (context, x, y, text, color) => {
+    context.save();
+    context.font = 'bold 12px sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.lineWidth = 4;
+    context.strokeStyle = 'rgba(255,255,255,0.85)';
+    context.strokeText(text, x, y);
+    context.fillStyle = color;
+    context.fillText(text, x, y);
+    context.restore();
 };
 
 const pointInConvexPolygon = (point, polygon) => {
@@ -195,7 +248,9 @@ const OptionsPanel = ({ showOptions, setShowOptions, fieldKey, setFieldKey, bgOp
     };
 
     const numericCellSize = isMM ? grid.cellSize * 10 : grid.cellSize;
-    const formattedCellSize = isMM ? numericCellSize.toFixed(1) : numericCellSize.toFixed(2);return (
+    const formattedCellSize = isMM ? numericCellSize.toFixed(1) : numericCellSize.toFixed(2);
+
+    return (
         <div className={`options-overlay ${showOptions ? 'options-overlay--visible' : ''}`} aria-hidden={!showOptions}>
             <div
                 className="options-overlay__backdrop"
@@ -802,6 +857,10 @@ const Toolbar = ({
     setShowOptions,
     rulerActive,
     handleRulerToggle,
+    showRobot,
+    onToggleRobot,
+    playbackSpeedMultiplier,
+    onPlaybackSpeedChange,
     reverseDrawing,
     onToggleReverse,
     referenceMode,
@@ -927,7 +986,8 @@ const Toolbar = ({
         setSnap45(prev => !prev);
     }, [setSnap45]);
 
-    const zoomLabel = Math.round(zoom * 100);return (
+    const zoomLabel = Math.round(zoom * 100);
+    return (
         <div className="toolbar-card sticky top-4 z-20">
             <button
                 type="button"
@@ -977,29 +1037,72 @@ const Toolbar = ({
                 Snap 45°
             </button>
             <button onClick={handleSnapGridToggle} className={`toolbar-btn ${snapGrid ? 'toolbar-btn--indigo' : 'toolbar-btn--muted'}`}>Snap Grid</button>
+            <button
+                onClick={onToggleRobot}
+                className={`toolbar-btn ${showRobot ? 'toolbar-btn--emerald' : 'toolbar-btn--muted'}`}
+                aria-pressed={showRobot}
+            >
+                {showRobot ? 'Robot visible' : 'Robot oculto'}
+            </button>
             <div className="toolbar-divider" />
-            <button
-                onPointerDown={(event) => handlePointerDown(event, 'mission')}
-                onPointerUp={(event) => handlePointerUp(event, 'mission')}
-                onPointerLeave={handlePointerCancel}
-                onPointerCancel={handlePointerCancel}
-                onClick={(event) => handleClick(event, startMission)}
-                className="toolbar-btn toolbar-btn--sky"
-            >
-                Misión ▶
-            </button>
-            <button
-                onPointerDown={(event) => handlePointerDown(event, 'section')}
-                onPointerUp={(event) => handlePointerUp(event, 'section')}
-                onPointerLeave={handlePointerCancel}
-                onPointerCancel={handlePointerCancel}
-                onClick={(event) => handleClick(event, startSection)}
-                className="toolbar-btn toolbar-btn--indigo"
-            >
-                Sección ▶
-            </button>
-            <button onClick={pauseResume} disabled={!isRunning} className={`toolbar-btn ${isPaused ? 'toolbar-btn--emerald' : 'toolbar-btn--amber'}`}>{isPaused ? 'Reanudar' : 'Pausar'}</button>
-            <button onClick={stopPlayback} disabled={!isRunning} className="toolbar-btn toolbar-btn--rose">Detener</button>
+            <div className="toolbar-group toolbar-group--playback">
+                <span className="toolbar-group__label">Reproducción</span>
+                <div className="flex flex-col gap-3 rounded-lg border border-slate-200/80 bg-white/80 p-3 shadow-sm">
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onPointerDown={(event) => handlePointerDown(event, 'mission')}
+                            onPointerUp={(event) => handlePointerUp(event, 'mission')}
+                            onPointerLeave={handlePointerCancel}
+                            onPointerCancel={handlePointerCancel}
+                            onClick={(event) => handleClick(event, startMission)}
+                            className="toolbar-btn toolbar-btn--sky flex-1 min-w-[120px]"
+                        >
+                            Misión ▶
+                        </button>
+                        <button
+                            onPointerDown={(event) => handlePointerDown(event, 'section')}
+                            onPointerUp={(event) => handlePointerUp(event, 'section')}
+                            onPointerLeave={handlePointerCancel}
+                            onPointerCancel={handlePointerCancel}
+                            onClick={(event) => handleClick(event, startSection)}
+                            className="toolbar-btn toolbar-btn--indigo flex-1 min-w-[120px]"
+                        >
+                            Sección ▶
+                        </button>
+                    </div>
+                    <label className="flex flex-col gap-1 text-xs text-slate-600">
+                        <span className="font-medium uppercase tracking-wide text-slate-500">Velocidad</span>
+                        <div className="flex items-center gap-3">
+                            <input
+                                type="range"
+                                min="0.25"
+                                max="2"
+                                step="0.05"
+                                value={playbackSpeedMultiplier}
+                                onChange={(event) => onPlaybackSpeedChange(Number(event.target.value))}
+                                className="flex-1"
+                            />
+                            <span className="w-12 text-right text-sm text-slate-700">{Math.round(playbackSpeedMultiplier * 100)}%</span>
+                        </div>
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                        <button
+                            onClick={pauseResume}
+                            disabled={!isRunning}
+                            className={`toolbar-btn flex-1 min-w-[120px] ${isPaused ? 'toolbar-btn--emerald' : 'toolbar-btn--amber'}`}
+                        >
+                            {isPaused ? 'Reanudar' : 'Pausar'}
+                        </button>
+                        <button
+                            onClick={stopPlayback}
+                            disabled={!isRunning}
+                            className="toolbar-btn toolbar-btn--rose flex-1 min-w-[120px]"
+                        >
+                            Detener
+                        </button>
+                    </div>
+                </div>
+            </div>
             {showZoomGroup && (
                 <div className="toolbar-group toolbar-group--zoom">
                     <span className="toolbar-group__label">Zoom</span>
@@ -1041,6 +1144,8 @@ export default function WROPlaybackPlanner() {
     const [grid, setGrid] = useState({ ...DEFAULT_GRID });
     const [robot, setRobot] = useState({ ...DEFAULT_ROBOT });
     const [robotImgObj, setRobotImgObj] = useState(null);
+    const [showRobot, setShowRobot] = useState(true);
+    const [playbackSpeedMultiplier, setPlaybackSpeedMultiplier] = useState(1);
     const [sections, setSections] = useState([{ id: uid('sec'), name: 'Sección 1', points: [], actions: [], color: DEFAULT_ROBOT.color, isVisible: true }]);
     const [obstacles, setObstacles] = useState([]);
     const [obstacleMode, setObstacleMode] = useState(false);
@@ -1067,7 +1172,7 @@ export default function WROPlaybackPlanner() {
         collisionObstacleIds: [],
     });
     const [dragging, setDragging] = useState({ active: false, sectionId: null, index: -1 });
-    const [hoverNode, setHoverNode] = useState({ sectionId: null, index: -1 });
+    const [hoverNode, setHoverNode] = useState({ sectionId: null, key: null, pointIndex: -1, kind: null });
     const [draggingStart, setDraggingStart] = useState(false);
     const [isRunning, setIsRunning] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
@@ -1083,8 +1188,10 @@ export default function WROPlaybackPlanner() {
     const [zoom, setZoom] = useState(1);
     const [canvasBaseSize, setCanvasBaseSize] = useState({ width: 0, height: 0 });
     const [cursorGuide, setCursorGuide] = useState({ x: 0, y: 0, visible: false });
+    const sectionNodesRef = useRef(new Map());
     const drawSessionRef = useRef({ active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() });
     const drawThrottleRef = useRef({ lastAutoAddTs: 0 });
+    const playbackSpeedRef = useRef(1);
     const DRAW_STEP_MIN_PX = 6;
     const DRAW_AUTO_INTERVAL_MS = 340;
     const COLLISION_ANIMATION_DURATION_MS = 900;
@@ -1344,7 +1451,7 @@ export default function WROPlaybackPlanner() {
     useEffect(() => {
         if (obstacleMode) {
             setDrawMode(false);
-            setHoverNode({ sectionId: null, index: -1 });
+            setHoverNode({ sectionId: null, key: null, pointIndex: -1, kind: null });
             drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
             setGhost(prev => (prev.active ? { ...prev, active: false, hasCollision: false, collisionObstacleIds: [] } : prev));
         } else {
@@ -1524,9 +1631,11 @@ export default function WROPlaybackPlanner() {
         return pts;
     }, [unitToPx, normalizeAngle]);
 
-    const recalcAllFollowingSections = useCallback((allSections, changedSectionId) => {
+    const recalcAllFollowingSections = useCallback((allSections, changedSectionId, options = {}) => {
         const changedIndex = allSections.findIndex(s => s.id === changedSectionId);
         if (changedIndex === -1) return allSections;
+
+        const { preserveChangedSectionPoints = false } = options;
 
         const sectionsCopy = allSections.map(section => ({ ...section }));
         const advancePose = (start, actions) => {
@@ -1547,7 +1656,7 @@ export default function WROPlaybackPlanner() {
 
         for (let i = 0; i < sectionsCopy.length; i++) {
             const startPose = { ...runningPose };
-            if (i >= changedIndex) {
+            if (i > changedIndex || (i === changedIndex && !preserveChangedSectionPoints)) {
                 const newPoints = pointsFromActions(sectionsCopy[i].actions, startPose);
                 sectionsCopy[i] = { ...sectionsCopy[i], points: newPoints };
             }
@@ -1683,6 +1792,118 @@ export default function WROPlaybackPlanner() {
         ctx.restore();
     }, [robot, robotImgObj, unitToPx]);
 
+    const appendPointToCurrentSection = useCallback((targetPoint, options = {}) => {
+        if (!currentSection) return { success: false };
+
+        const sectionId = currentSection.id;
+        const segmentReference = options.reference || referenceMode;
+        const reverseFlag = typeof options.reverse === 'boolean' ? options.reverse : reverseDrawing;
+
+        const fallbackPose = currentSection.points.length
+            ? getLastPoseOfSection(currentSection)
+            : computePoseUpToSection(sectionId);
+
+        let basePose = { ...fallbackPose };
+        if (options.anchorPose && Number.isFinite(options.anchorPose.x) && Number.isFinite(options.anchorPose.y)) {
+            basePose = {
+                x: options.anchorPose.x,
+                y: options.anchorPose.y,
+                theta: typeof options.anchorPose.theta === 'number' ? options.anchorPose.theta : fallbackPose.theta,
+            };
+        } else if (drawSessionRef.current.lastPoint && Number.isFinite(drawSessionRef.current.lastPoint.x) && Number.isFinite(drawSessionRef.current.lastPoint.y)) {
+            const { x, y, heading } = drawSessionRef.current.lastPoint;
+            basePose = {
+                x,
+                y,
+                theta: typeof heading === 'number' ? heading : fallbackPose.theta,
+            };
+        }
+
+        const projection = projectPointWithReference(targetPoint, basePose, segmentReference, reverseFlag);
+        if (!projection) return { success: false };
+
+        const { center, theta, distanceCenter, referenceDistance } = projection;
+        if ((distanceCenter ?? 0) < 1e-3 && (referenceDistance ?? 0) < 1e-3 && !options.allowZeroDistance) {
+            return { success: false };
+        }
+
+        const previewTheta = typeof options.heading === 'number' ? options.heading : theta;
+        const previewPose = { x: center.x, y: center.y, theta: previewTheta };
+        const { collisions } = evaluateSegmentCollision(basePose, previewPose, segmentReference);
+        const collisionIds = collisions.length ? [...new Set(collisions)] : [];
+
+        let approvals = drawSessionRef.current.approvedCollisionKeys;
+        if (!(approvals instanceof Set)) {
+            approvals = new Set();
+            drawSessionRef.current.approvedCollisionKeys = approvals;
+        }
+
+        if (collisionIds.length) {
+            const sortedIds = [...collisionIds].sort();
+            const key = `${segmentReference}:${sortedIds.join('|')}`;
+            if (!approvals.has(key)) {
+                const obstacleNames = formatObstacleNames(sortedIds);
+                const label = obstacleNames
+                    ? `${sortedIds.length > 1 ? 'los obstáculos' : 'el obstáculo'} ${obstacleNames}`
+                    : (sortedIds.length > 1 ? 'varios obstáculos' : 'un obstáculo');
+                const message = `El trayecto cruza ${label}. El robot colisionará. ¿Deseas continuar?`;
+                const shouldContinue = window.confirm(message);
+                if (!shouldContinue) {
+                    return { success: false, aborted: true };
+                }
+                approvals.add(key);
+            }
+        }
+
+        const centerPoint = {
+            x: center.x,
+            y: center.y,
+            reverse: reverseFlag,
+            reference: segmentReference,
+            heading: previewTheta,
+            collisionObstacleIds: collisionIds,
+        };
+        if (collisionIds.length) {
+            centerPoint.collisionApproved = true;
+        }
+
+        setSections(prev => {
+            const updated = prev.map(s => {
+                if (s.id !== sectionId) return s;
+                const newPts = [...s.points, centerPoint];
+                return recalcSectionFromPoints({ ...s, points: newPts });
+            });
+            return recalcAllFollowingSections(updated, sectionId);
+        });
+
+        return { success: true, centerPoint };
+    }, [currentSection, referenceMode, reverseDrawing, getLastPoseOfSection, computePoseUpToSection, projectPointWithReference, evaluateSegmentCollision, formatObstacleNames, setSections, recalcSectionFromPoints, recalcAllFollowingSections]);
+
+    const findSectionNodeHit = useCallback((sectionId, point, radius = 10) => {
+        if (!sectionId) return null;
+        const nodes = sectionNodesRef.current.get(sectionId) || [];
+        let closest = null;
+        nodes.forEach(node => {
+            const displayX = Number.isFinite(node.displayX) ? node.displayX : node.centerX;
+            const displayY = Number.isFinite(node.displayY) ? node.displayY : node.centerY;
+            const displayDist = Math.hypot(displayX - point.x, displayY - point.y);
+            const centerDist = Math.hypot(node.centerX - point.x, node.centerY - point.y);
+            const dist = Math.min(displayDist, centerDist);
+            if (dist > radius) return;
+            const hitX = displayDist <= centerDist ? displayX : node.centerX;
+            const hitY = displayDist <= centerDist ? displayY : node.centerY;
+            const priority = node.draggable ? 3 : (node.kind === 'rotation' ? 2 : 1);
+            if (!closest || priority > closest.priority || (priority === closest.priority && dist < closest.distance)) {
+                closest = { ...node, distance: dist, hitX, hitY, priority };
+            }
+        });
+        if (closest) {
+            const { priority: _priority, ...rest } = closest;
+            return rest;
+        }
+        return null;
+    }, []);
+
     const draw = useCallback(() => {
         const cvs = canvasRef.current; if (!cvs) return; const ctx = cvs.getContext('2d');
         ctx.clearRect(0, 0, cvs.width, cvs.height);
@@ -1721,8 +1942,8 @@ export default function WROPlaybackPlanner() {
                 ctx.scale(1 + burst, 1 + burst);
                 ctx.rotate(wobble);
             }
-            ctx.fillStyle = fillColor;
-            ctx.strokeStyle = strokeColor;
+        ctx.fillStyle = fillColor;
+        ctx.strokeStyle = strokeColor;
             ctx.lineWidth = isSelected && obstacleMode ? 3 : 2;
             ctx.beginPath();
             ctx.rect(-halfW, -halfH, obstacle.width, obstacle.height);
@@ -1785,13 +2006,19 @@ export default function WROPlaybackPlanner() {
             }
 
             ctx.restore();
-        });
+    });
+        sectionNodesRef.current.clear();
         sections.forEach(s => {
             if (s.isVisible === false || !s.points.length) return;
-            let pose = computePoseUpToSection(s.id);
-            s.points.forEach((pt) => {
+            const nodesForSection = [];
+            const moveNodeRefs = [];
+            const sectionStartPose = computePoseUpToSection(s.id);
+            let pose = { ...sectionStartPose };
+            let moveIndex = 0;
+            s.points.forEach((pt, index) => {
+                const segmentStartPose = { ...pose };
                 const reference = pt.reference || 'center';
-                const startDisplay = getReferencePoint(pose, reference);
+                const startDisplayPoint = getReferencePoint(pose, reference);
                 const dx = pt.x - pose.x;
                 const dy = pt.y - pose.y;
                 const dist = Math.hypot(dx, dy);
@@ -1803,35 +2030,223 @@ export default function WROPlaybackPlanner() {
                         : normalizeAngle(pt.reverse ? headingToPoint + Math.PI : headingToPoint);
                 }
                 const endPose = { x: pt.x, y: pt.y, theta: segmentTheta };
-                const endDisplay = getReferencePoint(endPose, reference);
+                const endDisplayPoint = getReferencePoint(endPose, reference);
                 const hasCollision = Array.isArray(pt.collisionObstacleIds) && pt.collisionObstacleIds.length > 0;
+                const isReverse = Boolean(pt.reverse);
+                const strokeBaseColor = hasCollision ? OBSTACLE_RENDER.blockedStroke : (s.color || '#000');
+                const strokeColor = (!hasCollision && isReverse) ? applyAlphaToColor(strokeBaseColor, reference === 'tip' ? 0.75 : 0.68) : strokeBaseColor;
+                const dashPattern = reference === 'tip'
+                    ? (isReverse ? [12, 6, 4, 6] : [12, 8])
+                    : (isReverse ? [6, 5] : []);
                 ctx.save();
                 ctx.lineWidth = reference === 'tip' ? 3.5 : 3;
-                ctx.strokeStyle = hasCollision ? OBSTACLE_RENDER.blockedStroke : (s.color || '#000');
-                ctx.setLineDash(reference === 'tip' ? [12, 8] : []);
+                ctx.strokeStyle = strokeColor;
+                ctx.setLineDash(dashPattern);
                 ctx.beginPath();
-                ctx.moveTo(startDisplay.x, startDisplay.y);
-                ctx.lineTo(endDisplay.x, endDisplay.y);
+                ctx.moveTo(startDisplayPoint.x, startDisplayPoint.y);
+                ctx.lineTo(endDisplayPoint.x, endDisplayPoint.y);
                 ctx.stroke();
                 ctx.restore();
+                const displayDx = endDisplayPoint.x - startDisplayPoint.x;
+                const displayDy = endDisplayPoint.y - startDisplayPoint.y;
+                const displayDist = Math.hypot(displayDx, displayDy);
+                moveIndex += 1;
+                if (displayDist > 1e-2) {
+                    const midX = startDisplayPoint.x + displayDx * 0.5;
+                    const midY = startDisplayPoint.y + displayDy * 0.5;
+                    const angle = Math.atan2(displayDy, displayDx);
+                    const arrowColor = hasCollision
+                        ? OBSTACLE_RENDER.blockedStroke
+                        : (isReverse ? applyAlphaToColor(s.color || '#1e293b', 0.9) : (s.color || '#1e293b'));
+                    drawDirectionSymbol(ctx, midX, midY, angle, arrowColor, isReverse);
+                    const perpX = displayDist > 0 ? (-displayDy / displayDist) : 0;
+                    const perpY = displayDist > 0 ? (displayDx / displayDist) : 0;
+                    const labelX = midX + perpX * 14;
+                    const labelY = midY + perpY * 14;
+                    drawMovementLabel(ctx, labelX, labelY, `${moveIndex}`, s.color || '#1e293b');
+                }
+
+                const moveNode = {
+                    sectionId: s.id,
+                    key: `${s.id}__move__${index}`,
+                    pointIndex: index,
+                    label: moveIndex,
+                    centerX: pt.x,
+                    centerY: pt.y,
+                    displayX: endDisplayPoint.x,
+                    displayY: endDisplayPoint.y,
+                    startDisplayX: startDisplayPoint.x,
+                    startDisplayY: startDisplayPoint.y,
+                    reference,
+                    isReverse,
+                    hasCollision,
+                    collisionObstacleIds: Array.isArray(pt.collisionObstacleIds) ? [...pt.collisionObstacleIds] : [],
+                    startPose: segmentStartPose,
+                    endPose,
+                    heading: endPose.theta,
+                    kind: 'move',
+                    rotationAngle: 0,
+                    actionIndex: null,
+                    draggable: true,
+                    markerRole: null,
+                };
+
+                nodesForSection.push(moveNode);
+                moveNodeRefs.push(moveNode);
+
                 pose = endPose;
             });
-            if (!drawMode) {
-                s.points.forEach((pt, i) => {
-                    ctx.beginPath();
-                    const isActive = (dragging.active && dragging.sectionId === s.id && dragging.index === i) || (hoverNode.sectionId === s.id && hoverNode.index === i);
-                    const radius = isActive ? 6 : 4;
-                    ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
-                    const pointCollision = Array.isArray(pt.collisionObstacleIds) && pt.collisionObstacleIds.length > 0;
-                    ctx.fillStyle = pointCollision ? OBSTACLE_RENDER.blockedStroke : (s.color || '#111827');
-                    ctx.fill();
-                    if (pt.reference === 'tip') {
-                        ctx.strokeStyle = '#f97316';
-                        ctx.lineWidth = 1.5;
-                        ctx.stroke();
-                    }
+
+            const moveCount = moveNodeRefs.length;
+            if (moveCount === 1) {
+                moveNodeRefs[0].markerRole = 'single';
+            } else if (moveCount > 1) {
+                moveNodeRefs.forEach((nodeRef, idx) => {
+                    if (idx === 0) nodeRef.markerRole = 'start';
+                    else if (idx === moveCount - 1) nodeRef.markerRole = 'end';
+                    else nodeRef.markerRole = 'middle';
                 });
             }
+
+            let actionCursorPose = { ...sectionStartPose };
+            s.actions.forEach((act, actionIdx) => {
+                if (act.type === 'rotate') {
+                    const angleRad = act.angle * DEG2RAD;
+                    if (Math.abs(angleRad) < 1e-6) {
+                        actionCursorPose.theta = normalizeAngle(actionCursorPose.theta + angleRad);
+                        return;
+                    }
+                    const rotationDisplay = getReferencePoint(actionCursorPose, 'center');
+                    const endTheta = normalizeAngle(actionCursorPose.theta + angleRad);
+                    nodesForSection.push({
+                        sectionId: s.id,
+                        key: `${s.id}__rot__${actionIdx}`,
+                        pointIndex: -1,
+                        label: null,
+                        centerX: actionCursorPose.x,
+                        centerY: actionCursorPose.y,
+                        displayX: rotationDisplay.x,
+                        displayY: rotationDisplay.y,
+                        startDisplayX: rotationDisplay.x,
+                        startDisplayY: rotationDisplay.y,
+                        reference: 'center',
+                        isReverse: false,
+                        hasCollision: false,
+                        collisionObstacleIds: [],
+                        startPose: { ...actionCursorPose },
+                        endPose: { x: actionCursorPose.x, y: actionCursorPose.y, theta: endTheta },
+                        heading: endTheta,
+                        kind: 'rotation',
+                        rotationAngle: act.angle,
+                        actionIndex: actionIdx,
+                        draggable: false,
+                        markerRole: null,
+                    });
+                    actionCursorPose = { ...actionCursorPose, theta: endTheta };
+                    return;
+                }
+                if (act.type === 'move') {
+                    const direction = Math.sign(act.distance) || 1;
+                    const travelPx = unitToPx(Math.abs(act.distance));
+                    const dx = Math.cos(actionCursorPose.theta) * travelPx * direction;
+                    const dy = Math.sin(actionCursorPose.theta) * travelPx * direction;
+                    actionCursorPose = {
+                        x: actionCursorPose.x + dx,
+                        y: actionCursorPose.y + dy,
+                        theta: actionCursorPose.theta,
+                    };
+                }
+            });
+
+            sectionNodesRef.current.set(s.id, nodesForSection);
+
+            nodesForSection.forEach(node => {
+                const drawX = Number.isFinite(node.displayX) ? node.displayX : node.centerX;
+                const drawY = Number.isFinite(node.displayY) ? node.displayY : node.centerY;
+                const isEditing = !drawMode;
+                const isDraggingNode = isEditing && node.draggable && dragging.active && dragging.sectionId === s.id && dragging.index === node.pointIndex;
+                const isHoverNode = isEditing && hoverNode.sectionId === s.id && hoverNode.key === node.key;
+
+                if (node.kind === 'rotation') {
+                    const ringRadius = isHoverNode ? 8 : 6;
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.lineWidth = isHoverNode ? 2.4 : 1.8;
+                    ctx.strokeStyle = '#14b8a6';
+                    ctx.arc(drawX, drawY, ringRadius, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.setLineDash([4, 3]);
+                    ctx.lineWidth = 1.2;
+                    ctx.arc(drawX, drawY, Math.max(2, ringRadius - 3), 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                    return;
+                }
+
+                if (node.kind !== 'move') return;
+
+                const baseRadius = 6;
+                const radius = (isDraggingNode || isHoverNode) ? baseRadius + 2 : baseRadius;
+                const pointCollision = node.hasCollision;
+                const role = node.markerRole || 'middle';
+                let fillColor;
+                switch (role) {
+                    case 'start':
+                        fillColor = '#22c55e';
+                        break;
+                    case 'end':
+                        fillColor = '#ef4444';
+                        break;
+                    case 'single':
+                        fillColor = '#22c55e';
+                        break;
+                    case 'middle':
+                    default:
+                        fillColor = '#facc15';
+                        break;
+                }
+                if (pointCollision) {
+                    fillColor = OBSTACLE_RENDER.blockedStroke;
+                }
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.shadowColor = 'rgba(15,23,42,0.28)';
+                ctx.shadowBlur = 4;
+                ctx.arc(drawX, drawY, radius, 0, Math.PI * 2);
+                ctx.fillStyle = fillColor;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                ctx.lineWidth = 2.2;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+
+                if (role === 'single') {
+                    ctx.beginPath();
+                    ctx.arc(drawX, drawY, Math.max(2, radius * 0.45), 0, Math.PI * 2);
+                    ctx.fillStyle = '#ef4444';
+                    ctx.fill();
+                    ctx.lineWidth = 1.1;
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.stroke();
+                }
+
+                if (isDraggingNode || isHoverNode) {
+                    ctx.lineWidth = 1.3;
+                    ctx.strokeStyle = '#0f172a';
+                    ctx.stroke();
+                }
+
+                if (pointCollision && role !== 'end') {
+                    ctx.lineWidth = 1.3;
+                    ctx.strokeStyle = OBSTACLE_RENDER.blockedStroke;
+                    ctx.stroke();
+                }
+
+                ctx.restore();
+            });
         });
         
         ctx.save(); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(grid.offsetX - 10, grid.offsetY); ctx.lineTo(grid.offsetX + 10, grid.offsetY); ctx.moveTo(grid.offsetX, grid.offsetY - 10); ctx.lineTo(grid.offsetX, grid.offsetY + 10); ctx.stroke(); ctx.restore();
@@ -1842,7 +2257,9 @@ export default function WROPlaybackPlanner() {
                 if (act.type === 'rotate') { finalPose.theta += act.angle * DEG2RAD; }
                 else { finalPose.x += Math.cos(finalPose.theta) * unitToPx(act.distance); finalPose.y += Math.sin(finalPose.theta) * unitToPx(act.distance); }
             }
-            drawRobot(ctx, finalPose, false);
+            if (showRobot) {
+                drawRobot(ctx, finalPose, false);
+            }
             if (drawMode && ghost.active) {
                 const anchorPose = currentSection.points.length > 0
                     ? getLastPoseOfSection(currentSection)
@@ -1863,7 +2280,9 @@ export default function WROPlaybackPlanner() {
                 ctx.lineTo(previewPoint.x, previewPoint.y);
                 ctx.stroke();
                 ctx.restore();
-                drawRobot(ctx, previewPose, true);
+                if (showRobot) {
+                    drawRobot(ctx, previewPose, true);
+                }
             }
         }
 
@@ -1887,7 +2306,10 @@ export default function WROPlaybackPlanner() {
         }
 
         if (isRunning) {
-            ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(5, 5, 120, 20); ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif'; const { idx, list } = actionCursorRef.current; ctx.fillText(`Acci?n ${idx + 1}/${list.length}`, 10, 18); ctx.restore(); drawRobot(ctx, playPose, false);
+            ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(5, 5, 120, 20); ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif'; const { idx, list } = actionCursorRef.current; ctx.fillText(`Acci?n ${idx + 1}/${list.length}`, 10, 18); ctx.restore();
+            if (showRobot) {
+                drawRobot(ctx, playPose, false);
+            }
             const anim = collisionAnimationRef.current;
             if (anim.active && anim.pose) {
                 const intensity = Math.max(0, Math.min(1, anim.timer / COLLISION_ANIMATION_DURATION_MS));
@@ -1926,7 +2348,7 @@ export default function WROPlaybackPlanner() {
             ctx.restore();
         }
         ctx.save(); ctx.fillStyle = '#22c55e'; ctx.beginPath(); ctx.arc(initialPose.x, initialPose.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
-    }, [bgImage, bgOpacity, grid, obstacles, sections, initialPose, drawMode, ghost, isRunning, playPose, dragging, hoverNode, unitToPx, computePoseUpToSection, drawRobot, currentSection, rulerActive, rulerPoints, pxToUnit, unit, getReferencePoint, getLastPoseOfSection, referenceMode, normalizeAngle, cursorGuide, obstacleMode, selectedObstacleId, robot]);
+    }, [bgImage, bgOpacity, grid, obstacles, sections, initialPose, drawMode, ghost, isRunning, playPose, dragging, hoverNode, unitToPx, computePoseUpToSection, drawRobot, currentSection, rulerActive, rulerPoints, pxToUnit, unit, getReferencePoint, getLastPoseOfSection, referenceMode, normalizeAngle, cursorGuide, obstacleMode, selectedObstacleId, robot, showRobot]);
 
     useEffect(() => { const preset = FIELD_PRESETS.find(p => p.key === fieldKey); if (!preset || !preset.bg) { setBgImage(null); return; } const img = new Image(); img.onload = () => setBgImage(img); img.src = preset.bg; }, [fieldKey]);
     useEffect(() => { if (!robot.imageSrc) { setRobotImgObj(null); return; } const img = new Image(); img.onload = () => setRobotImgObj(img); img.src = robot.imageSrc; }, [robot.imageSrc]);
@@ -1959,6 +2381,14 @@ export default function WROPlaybackPlanner() {
     }, [canvasBaseSize, zoom]);
     useEffect(() => { const handleKeyDown = (e) => { if (e.key === 'Escape') { setDrawMode(false); } }; window.addEventListener('keydown', handleKeyDown); return () => window.removeEventListener('keydown', handleKeyDown); }, []);
     useEffect(() => { draw(); }, [draw]);
+    useEffect(() => {
+        playbackSpeedRef.current = playbackSpeedMultiplier;
+    }, [playbackSpeedMultiplier]);
+    useEffect(() => {
+        if (drawMode) {
+            setHoverNode({ sectionId: null, key: null, pointIndex: -1, kind: null });
+        }
+    }, [drawMode, setHoverNode]);
 
     useEffect(() => {
         if (!sections.length) return;
@@ -2031,8 +2461,6 @@ export default function WROPlaybackPlanner() {
         return { x, y };
     };
 
-    const hitTestNode = (points, p, r = 8) => { for (let i = 0; i < points.length; i++) { if (Math.hypot(points[i].x - p.x, points[i].y - p.y) <= r) return i; } return -1; };
-    
     const onCanvasDown = (e) => {
         if (isSettingOrigin) return;
         if (obstacleMode) {
@@ -2118,7 +2546,12 @@ export default function WROPlaybackPlanner() {
         if (drawMode) return;
         const p = canvasPos(e);
         if (Math.hypot(initialPose.x - p.x, initialPose.y - p.y) <= 10) { setDraggingStart(true); return; }
-        if (currentSection) { const idx = hitTestNode(currentSection.points, p, 8); if (idx > -1) setDragging({ active: true, sectionId: currentSection.id, index: idx }); }
+        if (currentSection) {
+            const nodeHit = findSectionNodeHit(currentSection.id, p, 10);
+            if (nodeHit && nodeHit.draggable && Number.isInteger(nodeHit.pointIndex)) {
+                setDragging({ active: true, sectionId: currentSection.id, index: nodeHit.pointIndex });
+            }
+        }
     };
 
 
@@ -2210,14 +2643,23 @@ export default function WROPlaybackPlanner() {
                     const pts = s.points.map((pt, i) => (i === dragging.index ? { ...pt, x: p.x, y: p.y } : pt));
                     return recalcSectionFromPoints({ ...s, points: pts });
                 });
-                return recalcAllFollowingSections(newSections, dragging.sectionId);
+                return recalcAllFollowingSections(newSections, dragging.sectionId, { preserveChangedSectionPoints: true });
             });
             return;
         }
 
         if (!drawMode && currentSection) {
-            const idx = hitTestNode(currentSection.points, p, 8);
-            setHoverNode(idx > -1 ? { sectionId: currentSection.id, index: idx } : { sectionId: null, index: -1 });
+            const nodeHit = findSectionNodeHit(currentSection.id, p, 10);
+            if (nodeHit) {
+                setHoverNode({
+                    sectionId: currentSection.id,
+                    key: nodeHit.key || null,
+                    pointIndex: Number.isInteger(nodeHit.pointIndex) ? nodeHit.pointIndex : -1,
+                    kind: nodeHit.kind || null,
+                });
+            } else {
+                setHoverNode({ sectionId: null, key: null, pointIndex: -1, kind: null });
+            }
             return;
         }
 
@@ -2264,48 +2706,30 @@ export default function WROPlaybackPlanner() {
                     if (now - last < DRAW_AUTO_INTERVAL_MS) {
                         return;
                     }
-                    const collisionIds = collisions.length ? [...new Set(collisions)] : [];
-                    let collisionApproved = false;
-                    if (collisionIds.length) {
-                        const sortedIds = [...collisionIds].sort();
-                        const key = `${segmentReference}:${sortedIds.join('|')}`;
-                        let approvals = drawSessionRef.current.approvedCollisionKeys;
-                        if (!(approvals instanceof Set)) {
-                            approvals = new Set();
-                        }
-                        if (!approvals.has(key)) {
-                            const obstacleNames = formatObstacleNames(sortedIds);
-                            const label = obstacleNames
-                                ? `${sortedIds.length > 1 ? 'los obstáculos' : 'el obstáculo'} ${obstacleNames}`
-                                : (sortedIds.length > 1 ? 'varios obstáculos' : 'un obstáculo');
-                            const message = `El trayecto cruza ${label}. El robot colisionará. ¿Deseas continuar?`;
-                            const shouldContinue = window.confirm(message);
-                            if (!shouldContinue) {
-                                drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
-                                return;
-                            }
-                            approvals.add(key);
-                        }
-                        collisionApproved = true;
-                        drawSessionRef.current.approvedCollisionKeys = approvals;
-                    }
-                    const centerPoint = projection.center;
-                    setSections(prev => {
-                        const updated = prev.map(s => {
-                            if (s.id !== currentSection.id) return s;
-                            const newPts = [...s.points, { ...centerPoint, reverse: reverseDrawing, reference: segmentReference, heading: projection.theta, collisionObstacleIds: collisionIds, collisionApproved }];
-                            return recalcSectionFromPoints({ ...s, points: newPts });
-                        });
-                        return recalcAllFollowingSections(updated, currentSection.id);
+                    const result = appendPointToCurrentSection(p, {
+                        reference: segmentReference,
+                        reverse: reverseDrawing,
+                        heading: projection.theta,
+                        anchorPose,
                     });
-                    const prevApprovals = drawSessionRef.current.approvedCollisionKeys || new Set();
-                    drawSessionRef.current = {
-                        active: true,
-                        lastPoint: { x: centerPoint.x, y: centerPoint.y, heading: projection.theta },
-                        addedDuringDrag: true,
-                        approvedCollisionKeys: new Set(prevApprovals),
-                    };
-                    drawThrottleRef.current.lastAutoAddTs = now;
+                    if (result?.success && result.centerPoint) {
+                        const approvals = drawSessionRef.current.approvedCollisionKeys instanceof Set
+                            ? drawSessionRef.current.approvedCollisionKeys
+                            : new Set();
+                        drawSessionRef.current = {
+                            active: true,
+                            lastPoint: {
+                                x: result.centerPoint.x,
+                                y: result.centerPoint.y,
+                                heading: result.centerPoint.heading ?? projection.theta,
+                            },
+                            addedDuringDrag: true,
+                            approvedCollisionKeys: approvals,
+                        };
+                        drawThrottleRef.current.lastAutoAddTs = now;
+                    } else if (result?.aborted) {
+                        drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
+                    }
                 }
             }
         }
@@ -2356,48 +2780,16 @@ export default function WROPlaybackPlanner() {
         }
         const rawPoint = canvasPos(e, false);
         const p = snapGrid ? canvasPos(e, true) : rawPoint;
-        const basePose = currentSection.points.length
-            ? getLastPoseOfSection(currentSection)
-            : computePoseUpToSection(currentSection.id);
-        const segmentReference = referenceMode;
-        const projection = projectPointWithReference(p, basePose, segmentReference, reverseDrawing); // apunta la punta al mouse y convierte al centro
-        const previewPose = { x: projection.center.x, y: projection.center.y, theta: projection.theta };
-        const { collisions } = evaluateSegmentCollision(basePose, previewPose, segmentReference);
-        let collisionApproved = false;
-        const collisionIds = collisions.length ? [...new Set(collisions)] : [];
-        if (collisionIds.length) {
-            const sortedIds = [...collisionIds].sort();
-            const key = `${segmentReference}:${sortedIds.join('|')}`;
-            let approvals = drawSessionRef.current.approvedCollisionKeys;
-            if (!(approvals instanceof Set)) {
-                approvals = new Set();
-            }
-            if (!approvals.has(key)) {
-                const obstacleNames = formatObstacleNames(sortedIds);
-                const label = obstacleNames
-                    ? `${sortedIds.length > 1 ? 'los obstáculos' : 'el obstáculo'} ${obstacleNames}`
-                    : (sortedIds.length > 1 ? 'varios obstáculos' : 'un obstáculo');
-                const message = `El trayecto cruza ${label}. El robot colisionará. ¿Deseas continuar?`;
-                const shouldContinue = window.confirm(message);
-                if (!shouldContinue) {
-                    return;
-                }
-                approvals.add(key);
-            }
-            collisionApproved = true;
-            drawSessionRef.current.approvedCollisionKeys = approvals;
-        }
-        const centerPoint = projection.center;
-        setSections(prev => {
-            const updated = prev.map(s => {
-                if (s.id !== currentSection.id) return s;
-                const newPts = [...s.points, { ...centerPoint, reverse: reverseDrawing, reference: segmentReference, heading: projection.theta, collisionObstacleIds: collisionIds, collisionApproved }];
-                return recalcSectionFromPoints({ ...s, points: newPts });
-            });
-            return recalcAllFollowingSections(updated, currentSection.id);
+        const result = appendPointToCurrentSection(p, {
+            reference: referenceMode,
+            reverse: reverseDrawing,
         });
-        drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
-        drawThrottleRef.current.lastAutoAddTs = Date.now();
+        if (result?.success) {
+            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
+            drawThrottleRef.current.lastAutoAddTs = Date.now();
+        } else if (result?.aborted) {
+            drawSessionRef.current = { active: false, lastPoint: null, addedDuringDrag: false, approvedCollisionKeys: new Set() };
+        }
     };
 
     const handleContextMenu = (e) => {
@@ -2417,7 +2809,7 @@ export default function WROPlaybackPlanner() {
     const tick = useCallback(() => {
         if (isPaused) { lastTickRef.current = Date.now(); animRef.current = requestAnimationFrame(tick); return; }
         const nowTs = Date.now();
-        const deltaMs = nowTs - lastTickRef.current;
+        const deltaMs = Math.max(0, nowTs - lastTickRef.current);
         lastTickRef.current = nowTs;
         const currentAnim = collisionAnimationRef.current;
         if (currentAnim.active) {
@@ -2429,8 +2821,9 @@ export default function WROPlaybackPlanner() {
         const ac = actionCursorRef.current;
         if (ac.idx >= ac.list.length) { stopPlayback(); return; }
         const a = ac.list[ac.idx];
-        const rotStep = 5 * DEG2RAD;
-        const speedPx = unitToPx(40) / 60;
+        const speedMultiplier = Math.max(0.05, playbackSpeedRef.current);
+        const rotStepPerMs = (PLAYBACK_ROTATION_DEG_PER_SEC * DEG2RAD * speedMultiplier) / 1000;
+        const speedPxPerMs = unitToPx(PLAYBACK_LINEAR_SPEED_UNITS_PER_SEC * speedMultiplier) / 1000;
         setPlayPose(prev => {
             let pose = { ...prev };
             if (a.type === 'rotate') {
@@ -2444,7 +2837,8 @@ export default function WROPlaybackPlanner() {
                     ac.idx++;
                     return pose;
                 }
-                const step = Math.sign(remaining) * Math.min(Math.abs(remaining), rotStep);
+                const maxStep = rotStepPerMs * deltaMs;
+                const step = Math.sign(remaining) * Math.min(Math.abs(remaining), maxStep);
                 pose.theta += step;
                 ac.remainingAngle -= step;
                 if (Math.abs(ac.remainingAngle) < 1e-3) {
@@ -2465,7 +2859,8 @@ export default function WROPlaybackPlanner() {
                     ac.moveTotalPx = 0;
                     return pose;
                 }
-                const step = Math.min(speedPx, remainingPx);
+                const maxStep = speedPxPerMs * deltaMs;
+                const step = Math.min(maxStep, remainingPx);
                 const direction = ac.moveDirection ?? 1;
                 pose.x += Math.cos(pose.theta) * step * direction;
                 pose.y += Math.sin(pose.theta) * step * direction;
@@ -2560,6 +2955,13 @@ export default function WROPlaybackPlanner() {
             setRulerPoints({ start: null, end: null });
         }
     };
+    const toggleRobotVisibility = useCallback(() => {
+        setShowRobot(prev => !prev);
+    }, [setShowRobot]);
+    const handlePlaybackSpeedChange = useCallback((value) => {
+        if (!Number.isFinite(value)) return;
+        setPlaybackSpeedMultiplier(Math.min(2, Math.max(0.25, value)));
+    }, [setPlaybackSpeedMultiplier]);
     const addSection = () => { const id = uid('sec'); const lastSectionColor = sections.length > 0 ? sections[sections.length - 1].color : robot.color; const newSec = { id, name: `Sección ${sections.length + 1}`, points: [], actions: [], color: lastSectionColor, isVisible: true }; setSections(prev => [...prev, newSec]); setSelectedSectionId(id); setExpandedSections(prev => [...prev, id]); setDrawMode(true); };
     const toggleSectionExpansion = (id) => { setExpandedSections(ids => ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]); };
     const toggleSectionVisibility = (id) => { setSections(secs => secs.map(s => s.id === id ? { ...s, isVisible: !s.isVisible } : s)); };
@@ -2590,6 +2992,10 @@ export default function WROPlaybackPlanner() {
                         setShowOptions,
                         rulerActive,
                         handleRulerToggle,
+                        showRobot,
+                        onToggleRobot: toggleRobotVisibility,
+                        playbackSpeedMultiplier,
+                        onPlaybackSpeedChange: handlePlaybackSpeedChange,
                         reverseDrawing,
                         onToggleReverse: toggleReverseDrawing,
                         referenceMode,
